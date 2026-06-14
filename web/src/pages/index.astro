@@ -1,0 +1,29 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Album from '../components/Album';
+---
+
+<Layout title="進捗管理・図鑑">
+  <div class="space-y-8">
+    {/* ヒーローセクション */}
+    <div class="relative bg-gradient-to-tr from-gray-950 via-gray-900 to-yellow-950/20 border border-gray-800/80 rounded-3xl p-6 sm:p-8 overflow-hidden shadow-2xl">
+      <div class="absolute inset-x-0 bottom-0 top-1/2 bg-gradient-to-t from-gray-950/80 to-transparent"></div>
+      
+      <div class="relative z-10 space-y-3 max-w-2xl">
+        <span class="inline-flex items-center gap-1.5 px-3 py-1 bg-yellow-500/10 text-yellow-500 text-xs font-bold rounded-full border border-yellow-500/20">
+          <span class="w-1.5 h-1.5 rounded-full bg-yellow-500 animate-pulse"></span>
+          第4世代 イベント対応
+        </span>
+        <h1 class="text-2xl sm:text-4xl font-black text-white tracking-tight leading-tight">
+          青雲の志 <span class="text-yellow-500 bg-gradient-to-r from-yellow-500 to-amber-300 bg-clip-text text-transparent">コンプリート図鑑</span>
+        </h1>
+        <p class="text-sm text-gray-400 leading-relaxed font-medium">
+          『雀魂-じゃんたま-』内の人気モード「青雲の志」に登場するすべてのお守り、スタンプ、ルーンの進捗管理および、全ユーザーで共有可能な共同編集攻略Wikiシステム。
+        </p>
+      </div>
+    </div>
+
+    {/* メインのアルバム表示 */}
+    <Album client:load />
+  </div>
+</Layout>
