@@ -1,0 +1,49 @@
+---
+interface Props {
+  title: string;
+}
+
+const { title } = Astro.props;
+import '../styles/global.css';
+---
+
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="generator" content={Astro.generator} />
+    <title>{title} | 青雲コレクション</title>
+  </head>
+  <body class="bg-gray-950 text-gray-50 flex flex-col min-h-screen">
+    <header class="border-b border-gray-800 bg-gray-900/80 backdrop-blur sticky top-0 z-50">
+      <div class="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
+        <a href="/" class="flex items-center gap-2 font-bold text-xl text-yellow-500 hover:text-yellow-400 transition-colors">
+          <span class="text-2xl">☁️</span> 青雲コレクション
+        </a>
+        <nav class="flex items-center gap-6 text-sm font-medium">
+          <a href="/" class="hover:text-yellow-400 transition-colors">アルバム図鑑</a>
+          <a href="/contact" class="hover:text-yellow-400 transition-colors">お問い合わせ</a>
+          <a href="/privacy" class="hover:text-yellow-400 transition-colors">プライバシーポリシー</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="flex-grow max-w-6xl mx-auto px-4 py-8 w-full">
+      <slot />
+    </main>
+
+    <footer class="border-t border-gray-800 bg-gray-900/50 mt-auto py-6">
+      <div class="max-w-6xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-gray-400">
+        <div>
+          &copy; 2026 seiun-collection. All rights reserved.
+        </div>
+        <div class="flex gap-4">
+          <a href="/contact" class="hover:text-gray-200 transition-colors">お問い合わせ</a>
+          <a href="/privacy" class="hover:text-gray-200 transition-colors">プライバシーポリシー</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,32 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout title="お問い合わせ">
+  <div class="max-w-2xl mx-auto bg-gray-900 border border-gray-800 rounded-2xl p-8 shadow-xl text-center">
+    <span class="text-5xl mb-4 block">✉️</span>
+    <h1 class="text-3xl font-extrabold text-white mb-4">お問い合わせ</h1>
+    
+    <p class="text-gray-300 text-sm leading-relaxed mb-8 max-w-md mx-auto">
+      青雲コレクションに対するご意見、機能追加のご要望、不具合の報告、データ誤りの修正希望等については、下記の Google フォームよりお問い合わせください。
+    </p>
+
+    <div class="space-y-4">
+      <a
+        href="https://docs.google.com/forms/d/e/1FAIpQLSfD_dummy_inquiry_form/viewform"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="inline-flex items-center gap-2 justify-center px-6 py-3.5 bg-yellow-600 hover:bg-yellow-500 text-gray-900 font-bold rounded-xl shadow-lg hover:shadow-yellow-600/20 transform hover:-translate-y-0.5 transition-all text-sm w-full sm:w-auto"
+      >
+        <span>お問い合わせ窓口を開く</span>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+        </svg>
+      </a>
+      
+      <p class="text-xs text-gray-500 mt-4">
+        ※外部の Google フォームへ遷移します。
+      </p>
+    </div>
+  </div>
+</Layout>
