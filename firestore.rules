@@ -1,0 +1,41 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // マスターデータ: 全員読み取り可能、ログインユーザーによる画像・報告キーの部分更新のみ可能
+    match /items/{itemId} {
+      allow read: if true;
+      allow update: if request.auth != null 
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'image_url', 'report_count', 'reported_by', 
+          'name', 'effect_text', 'upgrade_from', 'upgrade_to', 
+          'relates_from', 'relates_to', 'uploaded_by', 'uploaded_at', 'updated_at'
+        ]);
+    }
+
+    // image_pool コレクション: 全員読み取り可能、ログイン済みユーザーのみ登録・紐付け変更可能
+    match /image_pool/{imageId} {
+      allow read: if true;
+      allow create, update: if request.auth != null;
+    }
+
+    // 共有攻略メモ: 全員読み取り可能、認証済みユーザーのみ書き込み可能
+    match /comments/{itemId} {
+      allow read: if true;
+      // ログイン済みであり、送信データ内の updated_by が自分の UID と一致することを保証
+      allow create, update: if request.auth != null 
+        && request.resource.data.updated_by == request.auth.uid;
+      // 削除は拒否
+      allow delete: if false;
+    }
+
+    // ユーザー基本情報: 本人のみ読み書き可能
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+      // ユーザー所持情報サブコレクション: 本人のみ読み書き可能
+      match /collections/{itemId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+  }
+}

@@ -1,0 +1,15 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // 誰でも読み取り可能、ログイン済みユーザーのみアップロード可能
+    match /item-images/{imageId} {
+      allow read: if true; // 誰もが図鑑画像として閲覧可能
+      allow create: if request.auth != null
+        && request.resource.size < 2 * 1024 * 1024 // クライアント側制限2MB（実質150KB以下圧縮を推奨）
+        && request.resource.contentType.matches('image/.*'); // 画像ファイルのみ
+      
+      // 管理者以外の削除・更新は制限、または原則上書き不可
+      allow update, delete: if false; // Wikiデータの完全性保持（通報による管理者削除を想定）
+    }
+  }
+}
