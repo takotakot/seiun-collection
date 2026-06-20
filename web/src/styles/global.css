@@ -1,7 +1,95 @@
 @import "tailwindcss";
 
-body {
-  background-color: #111827; /* Tailwind gray-900 */
-  color: #f9fafb; /* Tailwind gray-50 */
-  font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif;
+@theme {
+  --font-game: 'Outfit', 'Kosugi Maru', 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif;
 }
+
+body {
+  background-color: #08060f;
+  background-image: 
+    radial-gradient(circle at 50% 30%, #0e0d1d 0%, #040307 100%),
+    radial-gradient(1.5px 1.5px at 20px 30px, rgba(255, 255, 255, 0.4), rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 40px 70px, rgba(255,255,255,0.25), rgba(0,0,0,0)),
+    radial-gradient(1px 1px at 90px 10px, rgba(255,255,255,0.3), rgba(0,0,0,0)),
+    radial-gradient(1.5px 1.5px at 150px 80px, rgba(255, 255, 255, 0.4), rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 250px 130px, rgba(255,255,255,0.2), rgba(0,0,0,0)),
+    radial-gradient(1.5px 1.5px at 320px 40px, rgba(255, 255, 255, 0.4), rgba(0,0,0,0)),
+    radial-gradient(1px 1px at 390px 110px, rgba(255,255,255,0.35), rgba(0,0,0,0));
+  background-size: 100% 100%, 400px 400px, 400px 400px, 400px 400px, 400px 400px, 400px 400px, 400px 400px, 400px 400px;
+  background-repeat: no-repeat, repeat, repeat, repeat, repeat, repeat, repeat, repeat;
+  color: #f9fafb;
+  font-family: var(--font-game);
+}
+
+/* ダイヤ柄テクスチャの背景パターン */
+.bg-album-paper {
+  background-color: #f6eedb;
+  background-image: 
+    linear-gradient(135deg, #e7dfc3 25%, transparent 25%), 
+    linear-gradient(225deg, #e7dfc3 25%, transparent 25%), 
+    linear-gradient(45deg, #e7dfc3 25%, transparent 25%), 
+    linear-gradient(315deg, #e7dfc3 25%, #f6eedb 25%);
+  background-position: 8px 0, 8px 0, 0 0, 0 0;
+  background-size: 16px 16px;
+  background-repeat: repeat;
+}
+
+/* タイトル看板 */
+.album-title-board {
+  background: linear-gradient(to bottom, #ffd98a 0%, #ffa248 100%);
+  border: 4px solid #f6eedb;
+  border-radius: 16px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3), inset 0 2px 4px rgba(255, 255, 255, 0.5);
+  font-family: var(--font-game);
+  color: #7b4515;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+/* 左側ゲームタブ（デスクトップ） */
+.tab-game-active-desktop {
+  background: linear-gradient(to right, #ffd98a 0%, #ffa248 100%);
+  color: #633307;
+  font-weight: 900;
+  border: 3px solid #633307;
+  border-right: none;
+  border-radius: 12px 0 0 12px;
+  clip-path: polygon(100% 0%, 24px 0%, 0% 50%, 24px 100%, 100% 100%);
+  box-shadow: -4px 4px 10px rgba(0, 0, 0, 0.2);
+  transform: translateX(-4px);
+  z-index: 10;
+}
+
+.tab-game-inactive-desktop {
+  background: #3f396d;
+  color: #a49ed5;
+  font-weight: bold;
+  border: 3px solid #2d2654;
+  border-right: none;
+  border-radius: 10px 0 0 10px;
+  clip-path: polygon(100% 0%, 20px 0%, 0% 50%, 20px 100%, 100% 100%);
+  z-index: 5;
+}
+
+/* モバイル用ゲームタブ（上部横並び） */
+.tab-game-active-mobile {
+  background: linear-gradient(to bottom, #ffd98a 0%, #ffa248 100%);
+  color: #633307;
+  font-weight: 900;
+  border: 3px solid #633307;
+  border-bottom: none;
+  border-radius: 12px 12px 0 0;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.2);
+  z-index: 10;
+}
+
+.tab-game-inactive-mobile {
+  background: #3f396d;
+  color: #a49ed5;
+  font-weight: bold;
+  border: 3px solid #2d2654;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  z-index: 5;
+}
+
+

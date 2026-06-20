@@ -1,20 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  onAuthStateChanged, 
-  signInWithPopup, 
-  GoogleAuthProvider, 
-  signOut, 
-  type User 
+import {
+  onAuthStateChanged,
+  signInWithPopup,
+  GoogleAuthProvider,
+  signOut,
+  type User
 } from 'firebase/auth';
-import { 
-  collection, 
-  getDocs, 
-  doc, 
-  getDoc, 
-  setDoc, 
-  updateDoc, 
-  onSnapshot, 
-  query, 
+import {
+  collection,
+  getDocs,
+  doc,
+  getDoc,
+  setDoc,
+  updateDoc,
+  onSnapshot,
+  query,
   where,
   runTransaction,
   serverTimestamp,
@@ -60,6 +60,7 @@ export default function Album() {
   const [errorMessage, setErrorMessage] = useState('');
   const [isDataLoaded, setIsDataLoaded] = useState(false);
   const [lastActiveAtCache, setLastActiveAtAtCache] = useState<number | null>(null);
+  const [colsMode, setColsMode] = useState<'responsive' | 'fixed6'>('responsive');
 
   // 1. Google 認証
   const handleLogin = async () => {
@@ -189,7 +190,7 @@ export default function Album() {
           userId: user.uid,
           last_active_at: serverTimestamp()
         }, { merge: true });
-        
+
         setLastActiveAtAtCache(now);
       }
 
@@ -250,9 +251,9 @@ export default function Album() {
     try {
       await runTransaction(db, async (transaction) => {
         const commentSnap = await transaction.get(commentDocRef);
-        
+
         let currentVersion = 0;
-        
+
         if (commentSnap.exists()) {
           const currentComment = commentSnap.data() as SharedComment;
           currentVersion = currentComment.version || 0;
@@ -306,45 +307,45 @@ export default function Album() {
   const activeSelectedItem = items.find(it => it.itemId === selectedItemId);
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-      {/* 左〜中: 各世代のアルバム表示 */}
-      <div className="lg:col-span-2 space-y-6">
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+      {/* 左カラム (1/3幅) : コントロール・詳細/攻略メモ・カテゴリタブ */}
+      <div className="lg:col-span-1 space-y-6 order-2 lg:order-1 lg:sticky lg:top-24">
         {/* ログイン・ユーザーヘッダー */}
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
+        <div className="bg-[#1b153a] border border-[#2d2654] rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row lg:flex-col items-center sm:items-start lg:items-center justify-between gap-4 shadow-lg">
+          <div className="flex items-center gap-3 w-full">
             {user ? (
               <>
                 {user.photoURL ? (
-                  <img src={user.photoURL} alt="avatar" className="w-10 h-10 rounded-full border border-yellow-500/50" />
+                  <img src={user.photoURL} alt="avatar" className="w-10 h-10 rounded-full border-2 border-[#ffa248]" />
                 ) : (
-                  <div className="w-10 h-10 rounded-full bg-yellow-600/30 text-yellow-500 flex items-center justify-center font-bold">
+                  <div className="w-10 h-10 rounded-full bg-[#ffa248]/20 text-[#ffa248] flex items-center justify-center font-bold border border-[#ffa248]/40">
                     {user.displayName?.charAt(0) || '👤'}
                   </div>
                 )}
-                <div>
-                  <div className="text-sm font-bold text-white">{user.displayName || '雀士プロダクト'}</div>
-                  <div className="text-xs text-gray-400">ログイン中 (Google Auth)</div>
+                <div className="min-w-0">
+                  <div className="text-sm font-bold text-white truncate">{user.displayName || '雀士プロダクト'}</div>
+                  <div className="text-xs text-indigo-300">ログイン中 (Google Auth)</div>
                 </div>
               </>
             ) : (
               <div>
-                <div className="text-sm font-bold text-gray-300">進捗状況をリアルタイム同期しましょう</div>
-                <div className="text-xs text-gray-500">ログインすると、アイテムチェックと攻略メモの編集が可能になります。</div>
+                <div className="text-sm font-bold text-indigo-100">進捗を同期しましょう</div>
+                <div className="text-xs text-indigo-300">ログインすると、お守りチェックと攻略メモの編集が可能になります。</div>
               </div>
             )}
           </div>
-          <div>
+          <div className="w-full sm:w-auto lg:w-full flex justify-end lg:justify-center">
             {user ? (
               <button 
                 onClick={handleLogout}
-                className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 rounded-lg text-sm font-medium transition-colors cursor-pointer"
+                className="w-full sm:w-auto lg:w-full px-4 py-2 bg-[#2d2654] hover:bg-[#3d3470] text-indigo-200 border border-[#443a7a] rounded-xl text-xs font-bold transition-all cursor-pointer text-center"
               >
                 ログアウト
               </button>
             ) : (
               <button 
                 onClick={handleLogin}
-                className="px-5 py-2.5 bg-yellow-600 hover:bg-yellow-500 text-gray-950 font-bold rounded-lg text-sm shadow-md hover:shadow-yellow-600/10 transition-colors flex items-center gap-2 cursor-pointer"
+                className="w-full sm:w-auto lg:w-full px-5 py-2.5 bg-gradient-to-b from-[#ffd98a] to-[#ffa248] hover:from-[#ffe09e] hover:to-[#ffb260] text-[#633307] font-black rounded-xl text-xs sm:text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer border border-[#633307]/20"
               >
                 Googleでログイン
               </button>
@@ -352,39 +353,224 @@ export default function Album() {
           </div>
         </div>
 
+        {/* 詳細 ＆ 共有攻略メモ */}
+        <div className="bg-[#f5ebd7] border-4 border-[#523621] rounded-3xl p-5 md:p-6 shadow-xl relative overflow-hidden">
+          {/* 装飾用の端の角丸木枠 */}
+          <div className="absolute inset-2 border border-[#8a684b]/30 rounded-2xl pointer-events-none" />
+
+          {!selectedItemId ? (
+            <div className="text-center py-12 text-[#7c7764] space-y-3 z-10 relative">
+              <span className="text-4xl block animate-bounce">🔍</span>
+              <p className="text-xs font-bold leading-relaxed">アイテムをクリックして、詳細表示や攻略メモを書き込みましょう！</p>
+            </div>
+          ) : !activeSelectedItem ? (
+            <div className="text-center py-12 text-[#7c7764] font-bold z-10 relative">
+              選択されたアイテムのデータが見つかりません。
+            </div>
+          ) : (
+            <div className="space-y-4 z-10 relative">
+              {/* アイテムヘッダー部分 */}
+              <div className="flex items-center gap-4 border-b border-[#8a684b]/40 pb-4">
+                <div className={`w-14 h-14 rounded-xl flex items-center justify-center p-2 border relative shadow-inner ${
+                  activeSelectedItem.type === 'amulet' 
+                    ? 'bg-gradient-to-b from-[#64a56c] to-[#47804f] border-[#346039]' 
+                    : 'bg-black/5 border-[#8a684b]/20'
+                }`}>
+                  <img src={activeSelectedItem.image_url} alt={activeSelectedItem.name} className="w-10 h-10 object-contain" />
+                </div>
+                <div className="space-y-1 min-w-0">
+                  <span className="text-[9px] tracking-wider font-extrabold px-1.5 py-0.5 rounded bg-[#ffa248] text-[#633307] border border-[#633307]/20">
+                    {activeSelectedItem.type === 'amulet' ? 'お守り' : activeSelectedItem.type === 'stamp' ? 'スタンプ' : 'ルーン石'}
+                  </span>
+                  <h2 className="font-black text-sm sm:text-base text-[#523621] truncate leading-snug">{activeSelectedItem.name}</h2>
+                </div>
+              </div>
+
+              {/* ゲーム内の効果テキスト */}
+              <div className="bg-[#ebe0c5] border border-[#d6ccb0] rounded-2xl p-3.5 space-y-1 shadow-inner">
+                <span className="text-[9px] text-[#8a684b] font-extrabold tracking-wide block">効果・説明文</span>
+                <p className="text-xs text-[#523621] leading-relaxed font-bold">{activeSelectedItem.effect_text}</p>
+              </div>
+
+              {/* 強化ツリー（相互参照） */}
+              {(activeSelectedItem.upgrade_from || activeSelectedItem.upgrade_to) && (
+                <div className="bg-[#ffa248]/10 rounded-2xl border border-[#ffa248]/30 p-3 space-y-1.5 text-[11px]">
+                  <span className="text-[9px] text-[#b06c28] font-extrabold tracking-wide block">💡 強化リレーション</span>
+                  <div className="flex flex-col gap-1.5">
+                    {activeSelectedItem.upgrade_from && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-[#8a684b] font-bold">強化元:</span>
+                        {findItemByItemId(activeSelectedItem.upgrade_from) ? (
+                          <button 
+                            onClick={() => setSelectedItemId(activeSelectedItem.upgrade_from!)}
+                            className="text-[#b06c28] hover:underline font-black text-left"
+                          >
+                            {findItemByItemId(activeSelectedItem.upgrade_from)!.name}
+                          </button>
+                        ) : (
+                          <span className="text-[#8a684b] font-mono text-[10px]">{activeSelectedItem.upgrade_from}</span>
+                        )}
+                      </div>
+                    )}
+                    {activeSelectedItem.upgrade_to && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-[#8a684b] font-bold">強化先:</span>
+                        {findItemByItemId(activeSelectedItem.upgrade_to) ? (
+                          <button 
+                            onClick={() => setSelectedItemId(activeSelectedItem.upgrade_to!)}
+                            className="text-[#b06c28] hover:underline font-black text-left"
+                          >
+                            {findItemByItemId(activeSelectedItem.upgrade_to)!.name}
+                          </button>
+                        ) : (
+                          <span className="text-[#8a684b] font-mono text-[10px]">{activeSelectedItem.upgrade_to}</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* 共有攻略メモセクション */}
+              <div className="space-y-3 border-t border-[#8a684b]/40 pt-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-black text-[#523621] flex items-center gap-1.5">
+                    📝 ユーザー共有攻略メモ
+                  </h3>
+                  {activeComment && activeComment.version > 0 && (
+                    <span className="text-[9px] bg-[#ebe0c5] text-[#8a684b] font-mono px-1.5 py-0.5 rounded border border-[#d6ccb0] font-bold">
+                      Ver. {activeComment.version}
+                    </span>
+                  )}
+                </div>
+
+                {/* 前回の更新者メタ情報 */}
+                {activeComment && activeComment.updated_by_name && (
+                  <div className="text-[10px] text-[#8a684b] font-bold">
+                    最終更新: <span className="text-[#523621]">{activeComment.updated_by_name}</span> 
+                    {activeComment.updated_at && (
+                      <span className="font-normal text-[#8a684b]/80"> ({new Date(activeComment.updated_at.toMillis ? activeComment.updated_at.toMillis() : activeComment.updated_at).toLocaleString('ja-JP', { dateStyle: 'short', timeStyle: 'short' })})</span>
+                    )}
+                  </div>
+                )}
+
+                {/* 編集フォーム */}
+                {user ? (
+                  <div className="space-y-2">
+                    <textarea
+                      value={commentText}
+                      onChange={(e) => setCommentText(e.target.value)}
+                      placeholder="攻略メモを書き込みましょう。"
+                      className="w-full h-28 bg-[#ebe0c5] border border-[#d6ccb0] hover:border-[#bdae8c] focus:border-[#ffa248] focus:ring-2 focus:ring-[#ffa248]/20 text-[#523621] placeholder-[#8a684b]/60 rounded-xl p-3 text-xs focus:outline-none transition-all resize-none leading-relaxed font-semibold"
+                    />
+
+                    {errorMessage && (
+                      <div className="bg-rose-500/10 border border-rose-500/20 text-rose-700 text-xs p-3 rounded-lg leading-relaxed font-bold">
+                        {errorMessage}
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-end gap-3">
+                      {saveStatus === 'success' && (
+                        <span className="text-xs text-green-700 font-bold flex items-center gap-1">
+                          ✓ 保存しました！
+                        </span>
+                      )}
+                      <button
+                        onClick={handleSaveComment}
+                        disabled={saveStatus === 'saving'}
+                        className="px-4 py-2 bg-gradient-to-b from-[#ffd98a] to-[#ffa248] hover:from-[#ffe09e] hover:to-[#ffb260] disabled:opacity-50 text-[#633307] font-black rounded-lg text-xs shadow-md transition-all cursor-pointer border border-[#633307]/20"
+                      >
+                        {saveStatus === 'saving' ? '保存中...' : 'メモを更新する'}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-[#ebe0c5]/50 border border-[#d6ccb0] rounded-2xl p-4 text-center space-y-2 shadow-inner">
+                    <p className="text-xs text-[#8a684b] leading-relaxed font-bold">
+                      ログインすると、共同編集に参加できます。
+                    </p>
+                    {activeComment && activeComment.content ? (
+                      <div className="text-left py-2 px-2.5 bg-[#f5ebd7] border border-[#d6ccb0] rounded-xl text-xs text-[#523621] whitespace-pre-wrap leading-relaxed font-semibold">
+                        {activeComment.content}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-[#8a684b]/60 italic font-bold">
+                        現在、攻略メモはありません。
+                      </p>
+                    )}
+                    <button
+                      onClick={handleLogin}
+                      className="inline-block px-4 py-1.5 bg-[#523621] hover:bg-[#6c482e] text-[#f5ebd7] font-bold rounded-lg text-xs transition-colors cursor-pointer"
+                    >
+                      ログインして編集
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* デスクトップ用カテゴリ切り替えタブ */}
+        <div className="hidden lg:flex flex-col gap-2.5">
+          <div className="text-xs text-indigo-300 font-bold mb-1 font-game">カテゴリ切り替え</div>
+          {(['amulet', 'stamp', 'rune'] as const).map((tab) => {
+            const label = tab === 'amulet' ? '🧿 お守り' : tab === 'stamp' ? '💮 スタンプ' : '🌀 ルーン石';
+            const isActive = activeTab === tab;
+            return (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`w-full py-3.5 px-6 rounded-xl font-black text-sm transition-all cursor-pointer flex items-center justify-between shadow-md border ${
+                  isActive 
+                    ? 'bg-gradient-to-b from-[#ffd98a] to-[#ffa248] border-[#633307] text-[#633307]' 
+                    : 'bg-[#3f396d] border-[#2d2654] text-[#a49ed5] hover:text-white hover:bg-[#4f4785]'
+                }`}
+              >
+                <span>{label}</span>
+                {isActive && <span className="text-xs">➔</span>}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 右カラム (2/3幅) : アルバムフレーム・プログレスバー */}
+      <div className="lg:col-span-2 space-y-6 order-1 lg:order-2">
         {/* 全体プログレスバー */}
         {isDataLoaded && (
-          <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5 space-y-3">
+          <div className="bg-[#1b153a] border border-[#2d2654] rounded-2xl p-5 space-y-3 shadow-lg">
             <div className="flex justify-between items-center text-sm">
-              <span className="font-bold text-yellow-500 flex items-center gap-1.5">
+              <span className="font-bold text-[#ffa248] flex items-center gap-1.5 font-game">
                 👑 第4世代 コンプリート率
               </span>
-              <span className="font-semibold tabular-nums text-white">
+              <span className="font-bold font-mono text-white">
                 [ {ownedAll} / {totalAll} ({percentageAll}%) ]
               </span>
             </div>
-            <div className="w-full bg-gray-950 rounded-full h-3 overflow-hidden border border-gray-800">
+            <div className="w-full bg-[#0e0a22] rounded-full h-3 overflow-hidden border border-[#2d2654]">
               <div 
-                className="bg-gradient-to-r from-yellow-600 to-amber-400 h-full rounded-full transition-all duration-500 ease-out" 
+                className="bg-gradient-to-r from-[#ffa248] to-[#ffd98a] h-full rounded-full transition-all duration-500 ease-out" 
                 style={{ width: `${percentageAll}%` }}
               ></div>
             </div>
           </div>
         )}
 
-        {/* カテゴリタブ */}
-        <div className="flex gap-2 p-1 bg-gray-900/80 rounded-xl border border-gray-800">
+        {/* モバイル用カテゴリタブ (デスクトップ時は非表示) */}
+        <div className="flex lg:hidden gap-1 w-full px-2">
           {(['amulet', 'stamp', 'rune'] as const).map((tab) => {
-            const label = tab === 'amulet' ? '🧿 お守り' : tab === 'stamp' ? '💮 スタンプ' : '🌀 ルーン';
+            const label = tab === 'amulet' ? 'お守り' : tab === 'stamp' ? 'スタンプ' : 'ルーン石';
             const isActive = activeTab === tab;
             return (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
-                className={`flex-1 py-3 text-center text-sm font-bold rounded-lg transition-colors cursor-pointer ${
+                className={`flex-1 py-3 text-center text-xs sm:text-sm font-black transition-all cursor-pointer flex items-center justify-center gap-1 ${
                   isActive 
-                    ? 'bg-yellow-600 text-gray-950 font-black shadow-lg shadow-yellow-600/10' 
-                    : 'text-gray-400 hover:text-white hover:bg-gray-800/50'
+                    ? 'tab-game-active-mobile' 
+                    : 'tab-game-inactive-mobile hover:text-white hover:bg-[#4f4785]'
                 }`}
               >
                 {label}
@@ -393,263 +579,250 @@ export default function Album() {
           })}
         </div>
 
-        {/* アルバムグリッド */}
-        {!isDataLoaded ? (
-          <div className="flex justify-center py-20">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-yellow-500"></div>
+        {/* アルバムメインフレーム */}
+        <div className="bg-album-paper border-[8px] border-[#3c3566] rounded-3xl p-5 sm:p-8 shadow-[0_15px_40px_rgba(0,0,0,0.5)] relative">
+          {/* 看板 */}
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 album-title-board px-10 py-2.5 text-base md:text-lg font-black tracking-widest z-20">
+            アルバム
           </div>
-        ) : filteredItems.length === 0 ? (
-          <div className="bg-gray-900 border border-dashed border-gray-800 rounded-2xl py-12 text-center text-gray-500">
-            このカテゴリに登録されている第4世代のデータはありません。
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between px-1">
-              <div className="text-xs text-gray-400 font-medium">
-                ※ アイテムアイコンをクリックすることで所持/未所持をトグルできます
-              </div>
-              <div className="text-xs text-yellow-500 font-bold tabular-nums">
-                所持: {ownedInTab} / {totalInTab} ({percentageInTab}%)
-              </div>
-            </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 max-[450px]:grid-cols-2 md:grid-cols-4 gap-4">
-              {filteredItems.map((item) => {
-                const isOwned = !!ownedItemsMap[`${item.generation}_${item.itemId}`];
-                const isSelected = selectedItemId === item.itemId;
-
-                return (
-                  <div 
-                    key={item.id}
-                    className={`relative group bg-gray-900 rounded-2xl overflow-hidden border transition-all duration-200 flex flex-col ${
-                      isSelected 
-                        ? 'border-yellow-500 ring-2 ring-yellow-500/20 shadow-xl' 
-                        : 'border-gray-800 hover:border-gray-700 hover:shadow-lg'
-                    }`}
+          {/* アルバム内部: 所持数表示と設定、グリッド */}
+          <div className="mt-4 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-1 pb-3 border-b border-[#c8c2aa]/40">
+              <div className="text-[10px] text-[#7c7764] font-bold">
+                ※ チェックONで所持。カード枠クリックで詳細。
+              </div>
+              
+              <div className="flex items-center gap-4">
+                {/* 表示列数トグル */}
+                <div className="flex items-center gap-1 bg-[#ebdcb9] border border-[#c8c2aa] rounded-lg p-0.5 text-xs font-bold text-[#523621]">
+                  <button 
+                    onClick={() => setColsMode('responsive')}
+                    className={`px-2 py-0.5 rounded transition-all cursor-pointer ${colsMode === 'responsive' ? 'bg-[#ffa248] text-[#633307] shadow-sm' : 'hover:bg-[#dfd9c1]/50'}`}
                   >
-                    {/* アイコン画像エリア (トグル切り替え可能) */}
-                    <div 
-                      onClick={() => toggleOwnership(item)}
-                      className="relative aspect-square w-full bg-gray-950 flex items-center justify-center p-4 cursor-pointer overflow-hidden group-hover:opacity-95"
-                    >
-                      {/* 背景のグロー演出/色分け */}
-                      <div className={`absolute inset-0 opacity-10 bg-gradient-to-tr ${
-                        item.type === 'amulet' ? 'from-indigo-600 via-purple-600 to-blue-500' :
-                        item.type === 'stamp' ? 'from-rose-600 via-pink-600 to-orange-500' :
-                        'from-emerald-600 via-teal-600 to-cyan-500'
-                      }`} />
+                    自動調整
+                  </button>
+                  <button 
+                    onClick={() => setColsMode('fixed6')}
+                    className={`px-2 py-0.5 rounded transition-all cursor-pointer ${colsMode === 'fixed6' ? 'bg-[#ffa248] text-[#633307] shadow-sm' : 'hover:bg-[#dfd9c1]/50'}`}
+                  >
+                    6列固定
+                  </button>
+                </div>
 
-                      {/* 画像 (未所持の場合は明るさを落とす。南京錠などの画像はつけず暗転のみ) */}
-                      <img 
-                        src={item.image_url} 
-                        alt={item.name}
-                        className={`w-20 h-20 sm:w-24 sm:h-24 object-contain transition-all duration-300 ${
-                          isOwned 
-                            ? 'opacity-100 scale-100 drop-shadow-[0_0_12px_rgba(234,179,8,0.3)]' 
-                            : 'opacity-25 grayscale brightness-50 scale-95 hover:opacity-40'
+                <div className="text-xs text-[#7b4515] font-black font-mono">
+                  所持: {ownedInTab} / {totalInTab} ({percentageInTab}%)
+                </div>
+              </div>
+            </div>
+
+            {!isDataLoaded ? (
+              <div className="flex justify-center py-20">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#ffa248]"></div>
+              </div>
+            ) : filteredItems.length === 0 ? (
+              <div className="bg-[#ebdcb9]/40 border border-dashed border-[#c8c2aa] rounded-2xl py-12 text-center text-[#7c7764] font-bold">
+                登録されているデータがありません。
+              </div>
+            ) : (
+              <div className={
+                colsMode === 'fixed6'
+                  ? "grid grid-cols-6 gap-1.5"
+                  : "grid grid-cols-2 min-[450px]:grid-cols-3 md:grid-cols-4 gap-4"
+              }>
+                {filteredItems.map((item) => {
+                  const isOwned = !!ownedItemsMap[`${item.generation}_${item.itemId}`];
+                  const isSelected = selectedItemId === item.itemId;
+                  const isAmulet = item.type === 'amulet';
+                  const hasUpgrade = !!(item.upgrade_from || item.upgrade_to);
+
+                  if (isAmulet) {
+                    // お守りカード
+                    return (
+                      <div 
+                        key={item.id}
+                        onClick={() => setSelectedItemId(item.itemId)}
+                        className={`relative flex flex-col rounded-xl overflow-hidden border transition-all duration-200 cursor-pointer ${
+                          isSelected 
+                            ? 'border-[#ffa248] ring-4 ring-[#ffa248]/30 shadow-xl scale-[1.01]' 
+                            : 'border-[#c8c2aa] hover:border-[#a8a28a] hover:shadow-md'
                         }`}
-                        onError={(e) => {
-                          // もしStorage画像がない場合用のテキスト代替
-                          e.currentTarget.style.display = 'none';
-                        }}
-                      />
-
-                      {/* 所持リボン（画像右上） */}
-                      {isOwned && (
-                        <span className="absolute top-2 right-2 bg-yellow-500 text-gray-950 font-black text-[10px] px-2 py-0.5 rounded-full shadow-md z-10 scale-90 sm:scale-100">
-                          所持
-                        </span>
-                      )}
-
-                      {/* order番号表示（画像左下） */}
-                      <span className="absolute bottom-2 left-2 text-[10px] font-mono font-semibold text-gray-500 bg-gray-900/80 px-1.5 py-0.5 rounded border border-gray-800">
-                        #{item.order}
-                      </span>
-                    </div>
-
-                    {/* テキストカード下半分 */}
-                    <div className="p-3 flex-grow flex flex-col justify-between border-t border-gray-800 bg-gray-900">
-                      <div className="space-y-1">
-                        <button 
-                          onClick={() => setSelectedItemId(item.itemId)}
-                          className="font-bold text-sm text-left text-white leading-tight hover:text-yellow-500 transition-colors block w-full truncate focus:outline-none"
-                        >
-                          {item.name}
-                        </button>
-                        <p className="text-[11px] text-gray-400 line-clamp-2 min-h-[32px] leading-relaxed">
-                          {item.effect_text}
-                        </p>
-                      </div>
-
-                      <div className="pt-3 border-t border-gray-800/60 mt-2 flex items-center justify-between">
-                        <button
-                          onClick={() => setSelectedItemId(item.itemId)}
-                          className="text-[11px] font-semibold text-yellow-600 hover:text-yellow-500 flex items-center gap-1 cursor-pointer"
-                        >
-                          詳細・メモ 
-                          <span>➔</span>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* 右側: 選択したアイテムの詳細 ＆ 共有攻略メモ（Wiki） */}
-      <div className="space-y-6">
-        <div className="bg-gray-900 border border-gray-800 rounded-3xl p-6 shadow-xl sticky top-24">
-          {!selectedItemId ? (
-            <div className="text-center py-20 text-gray-500 space-y-3">
-              <span className="text-4xl block">🔍</span>
-              <p className="text-sm font-medium">アイテムをクリックして、詳細表示や全員で共有できる攻略メモを書き込みましょう！</p>
-            </div>
-          ) : !activeSelectedItem ? (
-            <div className="text-center py-20 text-gray-500">
-              選択されたアイテムのデータが見つかりません。
-            </div>
-          ) : (
-            <div className="space-y-6">
-              {/* アイテムヘッダー部分 */}
-              <div className="flex items-center gap-4 border-b border-gray-800 pb-5">
-                <div className="w-16 h-16 rounded-2xl bg-gray-950 flex items-center justify-center p-2 border border-gray-800 relative shadow-inner">
-                  <img src={activeSelectedItem.image_url} alt={activeSelectedItem.name} className="w-12 h-12 object-contain" />
-                </div>
-                <div className="space-y-1 min-w-0">
-                  <span className="text-[10px] uppercase tracking-wider font-extrabold px-2 py-0.5 rounded bg-amber-500/10 text-amber-500 border border-amber-500/20">
-                    {activeSelectedItem.type === 'amulet' ? 'お守り' : activeSelectedItem.type === 'stamp' ? 'スタンプ' : 'ルーン'}
-                  </span>
-                  <h2 className="font-black text-lg text-white truncate leading-snug">{activeSelectedItem.name}</h2>
-                </div>
-              </div>
-
-              {/* ゲーム内の効果テキスト */}
-              <div className="bg-gray-950/80 border border-gray-800/80 rounded-2xl p-4 space-y-2">
-                <span className="text-[10px] text-gray-500 font-extrabold uppercase tracking-wide block">効果・説明文</span>
-                <p className="text-sm text-gray-300 leading-relaxed font-medium">{activeSelectedItem.effect_text}</p>
-              </div>
-
-              {/* 強化ツリー（相互参照） */}
-              {(activeSelectedItem.upgrade_from || activeSelectedItem.upgrade_to) && (
-                <div className="bg-yellow-500/5 rounded-2xl border border-yellow-500/10 p-4 space-y-2 text-xs">
-                  <span className="text-[10px] text-yellow-500/70 font-extrabold uppercase tracking-wide block">💡 強化リレーション</span>
-                  <div className="flex flex-col gap-2">
-                    {activeSelectedItem.upgrade_from && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-gray-400">強化元:</span>
-                        {findItemByItemId(activeSelectedItem.upgrade_from) ? (
-                          <button 
-                            onClick={() => setSelectedItemId(activeSelectedItem.upgrade_from!)}
-                            className="text-yellow-600 hover:underline hover:text-yellow-500 font-semibold"
-                          >
-                            {findItemByItemId(activeSelectedItem.upgrade_from)!.name}
-                          </button>
-                        ) : (
-                          <span className="text-gray-500 font-mono text-[11px]">{activeSelectedItem.upgrade_from}</span>
-                        )}
-                      </div>
-                    )}
-                    {activeSelectedItem.upgrade_to && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-gray-400">強化先:</span>
-                        {findItemByItemId(activeSelectedItem.upgrade_to) ? (
-                          <button 
-                            onClick={() => setSelectedItemId(activeSelectedItem.upgrade_to!)}
-                            className="text-yellow-600 hover:underline hover:text-yellow-500 font-semibold"
-                          >
-                            {findItemByItemId(activeSelectedItem.upgrade_to)!.name}
-                          </button>
-                        ) : (
-                          <span className="text-gray-500 font-mono text-[11px]">{activeSelectedItem.upgrade_to}</span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* 共有攻略メモ（Wiki）セクション */}
-              <div className="space-y-4 border-t border-gray-800 pt-5">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-extrabold text-white flex items-center gap-1.5">
-                    📝 ユーザー共有攻略メモ (Wiki)
-                  </h3>
-                  {activeComment && activeComment.version > 0 && (
-                    <span className="text-[10px] bg-gray-800 text-gray-400 font-mono px-2 py-0.5 rounded border border-gray-700">
-                      Ver. {activeComment.version}
-                    </span>
-                  )}
-                </div>
-
-                {/* 前回の更新者メタ情報 */}
-                {activeComment && activeComment.updated_by_name && (
-                  <div className="text-[11px] text-gray-500">
-                    最終更新: <span className="font-bold text-gray-400">{activeComment.updated_by_name}</span> 
-                    {activeComment.updated_at && (
-                      <span> ({new Date(activeComment.updated_at.toMillis ? activeComment.updated_at.toMillis() : activeComment.updated_at).toLocaleString('ja-JP', { dateStyle: 'short', timeStyle: 'short' })})</span>
-                    )}
-                  </div>
-                )}
-
-                {/* 編集フォーム */}
-                {user ? (
-                  <div className="space-y-3">
-                    <textarea
-                      value={commentText}
-                      onChange={(e) => setCommentText(e.target.value)}
-                      placeholder="このお守りの組み合わせや有効な戦術、使い方など、みんなで共有する攻略メモを書き込みましょう。（Markdown対応予定）"
-                      className="w-full h-32 bg-gray-950 border border-gray-800 hover:border-gray-700 focus:border-yellow-500 focus:ring-1 focus:ring-yellow-500/20 text-gray-200 placeholder-gray-600 rounded-xl p-3 text-sm focus:outline-none transition-all resize-none leading-relaxed"
-                    />
-
-                    {errorMessage && (
-                      <div className="bg-rose-500/10 border border-rose-500/20 text-rose-500 text-xs p-3 rounded-lg leading-relaxed">
-                        {errorMessage}
-                      </div>
-                    )}
-
-                    <div className="flex items-center justify-end gap-3">
-                      {saveStatus === 'success' && (
-                        <span className="text-xs text-green-500 font-bold flex items-center gap-1">
-                          ✓ 保存しました！
-                        </span>
-                      )}
-                      <button
-                        onClick={handleSaveComment}
-                        disabled={saveStatus === 'saving'}
-                        className="px-5 py-2.5 bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 text-gray-950 font-black rounded-lg text-xs shadow-md transition-all cursor-pointer"
                       >
-                        {saveStatus === 'saving' ? '保存中...' : '攻略メモを更新する'}
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="bg-gray-950/80 border border-gray-800 rounded-2xl p-4 text-center space-y-3">
-                    <p className="text-xs text-gray-400 leading-relaxed">
-                      このアイテムの攻略メモ（Wiki）を閲覧しています。ログインすると、あなたも共同編集に参加できます。
-                    </p>
-                    {activeComment && activeComment.content ? (
-                      <div className="text-left py-2.5 px-3 bg-gray-900 border border-gray-800 rounded-xl text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">
-                        {activeComment.content}
+                        {/* 所持チェックボックス (誤操作防止のため絶対配置) */}
+                        <div 
+                          className={`absolute z-30 ${colsMode === 'fixed6' ? 'top-1 left-1' : 'top-2 left-2'}`}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <input 
+                            type="checkbox"
+                            checked={isOwned}
+                            onChange={() => toggleOwnership(item)}
+                            className={`accent-[#ffa248] cursor-pointer rounded border-[#c8c2aa] ${
+                              colsMode === 'fixed6' ? 'w-4.5 h-4.5' : 'w-5 h-5'
+                            }`}
+                          />
+                        </div>
+
+                        {/* 画像エリア (所持時は緑グラデ、未所持時はベージュ) */}
+                        <div 
+                          className={`relative aspect-square w-full flex items-center justify-center p-3 overflow-hidden transition-all ${
+                            isOwned 
+                              ? 'bg-gradient-to-b from-[#64a56c] to-[#47804f]' 
+                              : 'bg-[#d6d0b9]'
+                          }`}
+                        >
+                          {/* 未所持のハテナマーク */}
+                          {!isOwned && (
+                            <div className={`absolute inset-0 flex items-center justify-center text-white/90 font-black select-none ${
+                              colsMode === 'fixed6' ? 'text-4xl' : 'text-6xl'
+                            }`}>
+                              ?
+                            </div>
+                          )}
+
+                          <img 
+                            src={item.image_url} 
+                            alt={item.name}
+                            className={`object-contain transition-all duration-300 ${
+                              colsMode === 'fixed6'
+                                ? 'w-10 h-10 sm:w-11 sm:h-11'
+                                : 'w-20 h-20 sm:w-22 sm:h-22'
+                            } ${
+                              isOwned 
+                                ? 'opacity-100 scale-100 drop-shadow-[0_4px_8px_rgba(0,0,0,0.25)]' 
+                                : 'opacity-10 grayscale brightness-75 scale-95'
+                            }`}
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none';
+                            }}
+                          />
+
+                          {/* 強化マーク (上矢印) */}
+                          {hasUpgrade && (
+                            <div className={`absolute bottom-1.5 left-1.5 flex items-center justify-center rounded-lg border-2 shadow-sm ${
+                              colsMode === 'fixed6' ? 'w-5 h-5 border-[#633307]/50' : 'w-6 h-6'
+                            } ${
+                              isOwned 
+                                ? 'bg-[#ffa248] border-[#633307] text-[#633307]' 
+                                : 'bg-[#b8b39e] border-[#7c7764] text-[#7c7764]'
+                            }`}>
+                              <span className={`font-black ${colsMode === 'fixed6' ? 'text-[10px]' : 'text-xs'}`}>↑</span>
+                            </div>
+                          )}
+
+                          {/* order番号表示 */}
+                          <span className={`absolute bottom-1.5 right-1.5 font-mono font-bold px-1.5 py-0.5 rounded ${
+                            colsMode === 'fixed6' ? 'text-[7px]' : 'text-[9px]'
+                          } ${
+                            isOwned 
+                              ? 'bg-[#346039]/60 text-white border border-[#346039]/40' 
+                              : 'bg-[#7c7764]/20 text-[#7c7764] border border-[#7c7764]/20'
+                          }`}>
+                            #{item.order}
+                          </span>
+                        </div>
+
+                        {/* テキストエリア */}
+                        <div className={`p-2 flex-grow flex flex-col justify-between border-t ${
+                          colsMode === 'fixed6' ? 'p-1.5' : 'p-3'
+                        } ${
+                          isOwned 
+                            ? 'border-[#346039]/30 bg-[#eff7f0]' 
+                            : 'border-[#b3ad97]/30 bg-[#dfd9c1]'
+                        }`}>
+                          <div className="space-y-1">
+                            <div className={`font-bold text-left leading-tight truncate ${
+                              colsMode === 'fixed6' ? 'text-[9px]' : 'text-xs sm:text-sm'
+                            } ${isOwned ? 'text-[#153018]' : 'text-[#5a5649]'}`}>
+                              {item.name}
+                            </div>
+                            
+                            {/* 効果テキストを常時表示 */}
+                            <p className={`text-[10px] leading-tight font-semibold mt-1 ${
+                              colsMode === 'fixed6' ? 'text-[8px] line-clamp-1' : 'line-clamp-3'
+                            } ${isOwned ? 'text-[#346039]/80' : 'text-[#7c7764]'}`}>
+                              {item.effect_text}
+                            </p>
+                          </div>
+                        </div>
                       </div>
-                    ) : (
-                      <p className="text-xs text-gray-600 italic">
-                        現在、攻略メモはありません。
-                      </p>
-                    )}
-                    <button
-                      onClick={handleLogin}
-                      className="inline-block px-4 py-2 bg-gray-800 hover:bg-gray-700 text-yellow-500 font-bold rounded-lg text-xs border border-gray-700 transition-colors cursor-pointer"
-                    >
-                      ログインして編集に参加
-                    </button>
-                  </div>
-                )}
+                    );
+                  } else {
+                    // スタンプ・ルーン石専用デザイン (背景透過)
+                    return (
+                      <div 
+                        key={item.id}
+                        onClick={() => setSelectedItemId(item.itemId)}
+                        className={`relative flex flex-col items-center justify-between rounded-2xl border transition-all duration-200 cursor-pointer ${
+                          colsMode === 'fixed6' ? 'p-1' : 'p-3'
+                        } ${
+                          isSelected 
+                            ? 'border-[#ffa248] bg-[#ffa248]/5 ring-4 ring-[#ffa248]/20 shadow-lg scale-[1.01]' 
+                            : 'border-transparent hover:bg-black/5'
+                        }`}
+                      >
+                        {/* 所持チェックボックス (誤操作防止のため絶対配置) */}
+                        <div 
+                          className={`absolute z-30 ${colsMode === 'fixed6' ? 'top-1 right-1' : 'top-2 right-2'}`}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <input 
+                            type="checkbox"
+                            checked={isOwned}
+                            onChange={() => toggleOwnership(item)}
+                            className={`accent-[#ffa248] cursor-pointer rounded border-[#c8c2aa] ${
+                              colsMode === 'fixed6' ? 'w-4 h-4' : 'w-4.5 h-4.5'
+                            }`}
+                          />
+                        </div>
+
+                        <div className="relative w-full aspect-square flex items-center justify-center p-1">
+                          <img 
+                            src={item.image_url} 
+                            alt={item.name}
+                            className={`object-contain transition-all duration-300 ${
+                              colsMode === 'fixed6'
+                                ? 'w-10 h-10'
+                                : item.type === 'stamp' ? 'w-18 h-18 sm:w-20 sm:h-20' : 'w-20 h-20 sm:w-22 sm:h-22'
+                            } ${
+                              isOwned 
+                                ? 'opacity-100 scale-100 drop-shadow-[0_4px_10px_rgba(0,0,0,0.15)]' 
+                                : 'opacity-25 grayscale brightness-50 scale-95'
+                            }`}
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none';
+                            }}
+                          />
+
+                          {/* order番号表示 */}
+                          <span className={`absolute bottom-0 left-1 font-mono font-bold text-[#7c7764]/70 ${
+                            colsMode === 'fixed6' ? 'text-[7px]' : 'text-[9px]'
+                          }`}>
+                            #{item.order}
+                          </span>
+                        </div>
+
+                        <div className="w-full text-center mt-2 space-y-1">
+                          <div className={`font-bold text-center leading-tight truncate text-[#523621] ${
+                            colsMode === 'fixed6' ? 'text-[9px] mt-0.5' : 'text-xs sm:text-sm'
+                          }`}>
+                            {item.name}
+                          </div>
+
+                          {/* 効果テキストを常時表示 (6列固定時は非表示にしてスペース確保) */}
+                          {colsMode !== 'fixed6' && (
+                            <p className="text-[10px] text-[#7c7764] text-center leading-tight mt-1 line-clamp-2 max-w-[120px] mx-auto font-semibold">
+                              {item.effect_text}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  }
+                })}
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
     </div>
