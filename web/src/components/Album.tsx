@@ -307,8 +307,8 @@ export default function Album() {
   const activeSelectedItem = items.find(it => it.itemId === selectedItemId);
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
-      {/* 左カラム (1/3幅) : コントロール・詳細/攻略メモ・カテゴリタブ */}
+    <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 items-start">
+      {/* 左カラム (1/4幅) : コントロール・詳細/攻略メモ・カテゴリタブ */}
       <div className="lg:col-span-1 space-y-6 order-2 lg:order-1 lg:sticky lg:top-24">
         {/* ログイン・ユーザーヘッダー */}
         <div className="bg-[#1b153a] border border-[#2d2654] rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row lg:flex-col items-center sm:items-start lg:items-center justify-between gap-4 shadow-lg">
@@ -536,8 +536,8 @@ export default function Album() {
         </div>
       </div>
 
-      {/* 右カラム (2/3幅) : アルバムフレーム・プログレスバー */}
-      <div className="lg:col-span-2 space-y-6 order-1 lg:order-2">
+      {/* 右カラム (3/4幅) : アルバムフレーム・プログレスバー */}
+      <div className="lg:col-span-3 space-y-6 order-1 lg:order-2">
         {/* 全体プログレスバー */}
         {isDataLoaded && (
           <div className="bg-[#1b153a] border border-[#2d2654] rounded-2xl p-5 space-y-3 shadow-lg">

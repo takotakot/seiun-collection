@@ -21,7 +21,7 @@ import '../styles/global.css';
   </head>
   <body class="text-gray-50 flex flex-col min-h-screen font-game">
     <header class="border-b border-indigo-950/50 bg-indigo-950/40 backdrop-blur-md sticky top-0 z-50">
-      <div class="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
+      <div class="w-full max-w-none px-4 md:px-8 lg:px-12 h-16 flex items-center justify-between">
         <a href="/" class="flex items-center gap-2 font-bold text-xl text-amber-400 hover:text-amber-300 transition-colors tracking-wider font-game">
           <span class="text-2xl">☁️</span> 青雲コレクション
         </a>
@@ -33,12 +33,12 @@ import '../styles/global.css';
       </div>
     </header>
 
-    <main class="flex-grow max-w-6xl mx-auto px-4 py-8 w-full">
+    <main class="flex-grow w-full max-w-none px-4 md:px-8 lg:px-12 py-8">
       <slot />
     </main>
 
     <footer class="border-t border-indigo-950/50 bg-indigo-950/20 mt-auto py-6">
-      <div class="max-w-6xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-gray-400">
+      <div class="w-full max-w-none px-4 md:px-8 lg:px-12 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-gray-400">
         <div>
           &copy; 2026 seiun-collection. All rights reserved.
         </div>
