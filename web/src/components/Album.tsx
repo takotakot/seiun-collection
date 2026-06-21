@@ -21,6 +21,7 @@ import {
   Timestamp
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
+import plusIcon from '../assets/plus.webp';
 
 interface Item {
   id: string;
@@ -697,16 +698,20 @@ export default function Album() {
                             }}
                           />
 
-                          {/* 強化マーク (上矢印) */}
+                          {/* 強化マーク (プラス画像) */}
                           {hasUpgrade && (
-                            <div className={`absolute bottom-1.5 left-1.5 flex items-center justify-center rounded-lg border-2 shadow-sm ${
-                              colsMode === 'fixed6' ? 'w-5 h-5 border-[#633307]/50' : 'w-6 h-6'
-                            } ${
-                              isOwned 
-                                ? 'bg-[#ffa248] border-[#633307] text-[#633307]' 
-                                : 'bg-[#b8b39e] border-[#7c7764] text-[#7c7764]'
+                            <div className={`absolute bottom-1 left-1 flex items-center justify-center ${
+                              colsMode === 'fixed6' ? 'w-6 h-6' : 'w-8 h-8'
                             }`}>
-                              <span className={`font-black ${colsMode === 'fixed6' ? 'text-[10px]' : 'text-xs'}`}>↑</span>
+                              <img 
+                                src={typeof plusIcon === 'string' ? plusIcon : plusIcon.src} 
+                                alt="+" 
+                                className={`object-contain w-full h-full transition-all duration-200 ${
+                                  isOwned 
+                                    ? 'opacity-100 drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)]' 
+                                    : 'opacity-40 grayscale'
+                                }`} 
+                              />
                             </div>
                           )}
 
