@@ -1,5 +1,8 @@
 ---
 import Layout from '../layouts/Layout.astro';
+
+// 環境変数からフォームURLを取得（未設定時のフォールバックを用意）
+const contactFormUrl = import.meta.env.PUBLIC_CONTACT_FORM_URL || 'https://docs.google.com/forms/d/e/1FAIpQLSfD_dummy_inquiry_form/viewform';
 ---
 
 <Layout title="お問い合わせ">
@@ -13,7 +16,7 @@ import Layout from '../layouts/Layout.astro';
 
     <div class="space-y-4">
       <a
-        href="https://docs.google.com/forms/d/e/1FAIpQLSfD_dummy_inquiry_form/viewform"
+        href={contactFormUrl}
         target="_blank"
         rel="noopener noreferrer"
         class="inline-flex items-center gap-2 justify-center px-6 py-3.5 bg-yellow-600 hover:bg-yellow-500 text-gray-900 font-bold rounded-xl shadow-lg hover:shadow-yellow-600/20 transform hover:-translate-y-0.5 transition-all text-sm w-full sm:w-auto"
