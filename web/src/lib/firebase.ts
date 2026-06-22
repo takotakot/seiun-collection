@@ -1,6 +1,7 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { getAuth, connectAuthEmulator } from 'firebase/auth';
+import { getStorage, connectStorageEmulator } from 'firebase/storage';
 
 const firebaseConfig = {
   apiKey: import.meta.env.PUBLIC_FIREBASE_API_KEY || "dummy-api-key-for-local-dev-only",
@@ -14,6 +15,7 @@ const firebaseConfig = {
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 const db = getFirestore(app);
 const auth = getAuth(app);
+const storage = getStorage(app);
 
 // 必要に応じて Firestore / Auth のエミュレータに接続する
 if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
@@ -22,6 +24,7 @@ if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' |
     try {
       connectFirestoreEmulator(db, '127.0.0.1', 8080);
       connectAuthEmulator(auth, 'http://127.0.0.1:9099');
+      connectStorageEmulator(storage, '127.0.0.1', 9199);
       console.log('Firebase emulators connected');
     } catch (e) {
       console.warn('Emulator connection warning:', e);
@@ -29,4 +32,4 @@ if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' |
   }
 }
 
-export { app, db, auth };
+export { app, db, auth, storage };

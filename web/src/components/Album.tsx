@@ -18,9 +18,12 @@ import {
   where,
   runTransaction,
   serverTimestamp,
-  Timestamp
+  Timestamp,
+  increment,
+  arrayUnion
 } from 'firebase/firestore';
-import { db, auth } from '../lib/firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { db, auth, storage } from '../lib/firebase';
 import plusIcon from '../assets/plus.webp';
 
 interface Item {
@@ -34,6 +37,16 @@ interface Item {
   image_url: string;
   upgrade_from?: string;
   upgrade_to?: string;
+  report_count?: number;
+  reported_by?: string[];
+}
+
+interface ImagePoolItem {
+  id: string;
+  fileName: string;
+  url: string;
+  is_linked: boolean;
+  target_item_id: string | null;
 }
 
 interface UserCollection {
@@ -63,6 +76,12 @@ export default function Album() {
   const [lastActiveAtCache, setLastActiveAtAtCache] = useState<number | null>(null);
   const [colsMode, setColsMode] = useState<'responsive' | 'fixed6'>('responsive');
 
+  // 画像プール管理用の状態
+  const [imagePool, setImagePool] = useState<ImagePoolItem[]>([]);
+  const [showPoolSelector, setShowPoolSelector] = useState(false);
+  const [showAllPoolImages, setShowAllPoolImages] = useState(false);
+  const [uploadProgress, setUploadStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
+
   // 1. Google 認証
   const handleLogin = async () => {
     const provider = new GoogleAuthProvider();
@@ -83,28 +102,40 @@ export default function Album() {
     }
   };
 
-  // 2. マスターデータの取得 ( items コレクション )
+  // 2. マスターデータ及び画像プールデータの取得
   // 第4世代のみを主軸として扱う（概要.mdに準拠）
   useEffect(() => {
-    const fetchItems = async () => {
-      try {
-        const itemsSnap = await getDocs(collection(db, 'items'));
-        const loadedItems: Item[] = [];
-        itemsSnap.forEach((doc) => {
-          const data = doc.data() as Item;
-          if (data.generation === 4) {
-            loadedItems.push(data);
-          }
-        });
-        // 並び順（order）でソート
-        loadedItems.sort((a, b) => a.order - b.order);
-        setItems(loadedItems);
-        setIsDataLoaded(true);
-      } catch (err) {
-        console.error('マスターデータ読み込みエラー:', err);
-      }
+    // itemsコレクションのリアルタイム購読にして、通報や画像変更が即時反映されるようにする
+    const unsubscribeItems = onSnapshot(collection(db, 'items'), (snapshot) => {
+      const loadedItems: Item[] = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data() as Item;
+        if (data.generation === 4) {
+          loadedItems.push(data);
+        }
+      });
+      loadedItems.sort((a, b) => a.order - b.order);
+      setItems(loadedItems);
+      setIsDataLoaded(true);
+    }, (err) => {
+      console.error('マスターデータリアルタイム購読エラー:', err);
+    });
+
+    // image_poolコレクションのリアルタイム購読
+    const unsubscribePool = onSnapshot(collection(db, 'image_pool'), (snapshot) => {
+      const loadedPool: ImagePoolItem[] = [];
+      snapshot.forEach((doc) => {
+        loadedPool.push(doc.data() as ImagePoolItem);
+      });
+      setImagePool(loadedPool);
+    }, (err) => {
+      console.error('画像プール購読エラー:', err);
+    });
+
+    return () => {
+      unsubscribeItems();
+      unsubscribePool();
     };
-    fetchItems();
   }, []);
 
   // 3. ユーザー所持状況のリアルタイム監視
@@ -305,6 +336,151 @@ export default function Album() {
     return items.find(it => it.itemId === itId);
   };
 
+  // 画像プールの特定画像をアイテムに紐付ける処理
+  const handleAttachImage = async (poolItem: ImagePoolItem) => {
+    if (!user) {
+      alert('画像の紐付けにはログインが必要です。');
+      return;
+    }
+    if (!selectedItemId) return;
+
+    const currentItem = items.find(it => it.itemId === selectedItemId);
+    if (!currentItem) return;
+
+    try {
+      await runTransaction(db, async (transaction) => {
+        const itemRef = doc(db, 'items', currentItem.id);
+        const poolItemRef = doc(db, 'image_pool', poolItem.id);
+
+        // トランザクション内でアイテムの画像、アップロードメタ情報を同期
+        transaction.update(itemRef, {
+          image_url: poolItem.url,
+          uploaded_by: user.uid,
+          uploaded_at: serverTimestamp()
+        });
+
+        // プール側の状態も「紐付け済み、指定アイテムID」に同期
+        transaction.update(poolItemRef, {
+          is_linked: true,
+          target_item_id: currentItem.id
+        });
+      });
+
+      alert('プールの画像をお守りにアタッチしました！');
+      setShowPoolSelector(false);
+    } catch (err) {
+      console.error('画像アタッチエラー:', err);
+      alert('画像の紐付けに失敗しました。');
+    }
+  };
+
+  // 画像を新規アップロードし、自動トランスパイル・圧縮した上でバケット＆プール・アイテムに直接アタッチ
+  const handleUploadAndAttach = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!user) {
+      alert('アップロードにはログインが必要です。');
+      return;
+    }
+    if (!selectedItemId) return;
+
+    const currentItem = items.find(it => it.itemId === selectedItemId);
+    if (!currentItem) return;
+
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // クライアント側サイズ検証: 2MB以下
+    if (file.size > 2 * 1024 * 1024) {
+      alert('ファイルサイズが2MBを超えています。より軽量な画像を選択してください。');
+      return;
+    }
+
+    setUploadStatus('uploading');
+
+    try {
+      // Browser Canvas を使ったクライアント側での画像自動リサイズ & WebP超トランスパイル (50KB前後)
+      const compressedBlob = await new Promise<Blob>((resolve, reject) => {
+        const img = new Image();
+        img.src = URL.createObjectURL(file);
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const maxDim = 480; // お守り表示用に最大横幅・縦幅を480pxに制限
+          let w = img.width;
+          let h = img.height;
+
+          if (w > maxDim || h > maxDim) {
+            if (w > h) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            } else {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+          }
+
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            reject(new Error('Canvas context failed'));
+            return;
+          }
+
+          ctx.drawImage(img, 0, 0, w, h);
+          // 高圧縮率 0.82 の WebP に変換して超軽量化
+          canvas.toBlob((blob) => {
+            if (blob) resolve(blob);
+            else reject(new Error('Blob convert failed'));
+          }, 'image/webp', 0.82);
+        };
+        img.onerror = () => reject(new Error('Image load failed'));
+      });
+
+      // Storage用のグローバル一意なフラットパス作成
+      const uniqueId = crypto.randomUUID();
+      const storagePath = `item-images/${uniqueId}.webp`;
+      const fileRef = ref(storage, storagePath);
+
+      // Storage バケットへトランスパイルデータを転送
+      await uploadBytes(fileRef, compressedBlob, {
+        contentType: 'image/webp'
+      });
+
+      // ダウンロードリンクをフェッチ
+      const downloadUrl = await getDownloadURL(fileRef);
+
+      // Firestoreを一括アトミック更新
+      await runTransaction(db, async (transaction) => {
+        const itemRef = doc(db, 'items', currentItem.id);
+        const poolItemRef = doc(db, 'image_pool', uniqueId);
+
+        // items の画像指定
+        transaction.update(itemRef, {
+          image_url: downloadUrl,
+          uploaded_by: user.uid,
+          uploaded_at: serverTimestamp()
+        });
+
+        // image_pool に画像情報をプール登録 (is_linked=true, 指定アイテム紐付け)
+        transaction.set(poolItemRef, {
+          id: uniqueId,
+          fileName: `${uniqueId}.webp`,
+          url: downloadUrl,
+          is_linked: true,
+          target_item_id: currentItem.id
+        });
+      });
+
+      setUploadStatus('success');
+      alert('画像をWebP圧縮してアップロードし、お守りへのアタッチが成功しました！');
+      setShowPoolSelector(false);
+      setTimeout(() => setUploadStatus('idle'), 3000);
+    } catch (err) {
+      console.error('アップロード・紐付け失敗:', err);
+      setUploadStatus('error');
+      alert('画像のアップロードまたは紐付けに失敗しました。');
+    }
+  };
+
   const activeSelectedItem = items.find(it => it.itemId === selectedItemId);
 
   return (
@@ -377,14 +553,54 @@ export default function Album() {
                     ? 'bg-gradient-to-b from-[#64a56c] to-[#47804f] border-[#346039]' 
                     : 'bg-black/5 border-[#8a684b]/20'
                 }`}>
-                  <img src={activeSelectedItem.image_url} alt={activeSelectedItem.name} className="w-10 h-10 object-contain" />
+                  {/* 通報状態の場合は警告プレースホルダー、通常状態は画像表示 */}
+                  {activeSelectedItem.report_count && activeSelectedItem.report_count >= 1 ? (
+                    <div className="absolute inset-0 bg-[#ebe0c5] flex flex-col items-center justify-center text-center p-1 border border-rose-300 rounded-xl z-20">
+                      <span className="text-xs">⚠️</span>
+                      <span className="text-[7px] text-rose-700 font-extrabold scale-90">確認中</span>
+                    </div>
+                  ) : (
+                    <img src={activeSelectedItem.image_url} alt={activeSelectedItem.name} className="w-10 h-10 object-contain" />
+                  )}
                 </div>
-                <div className="space-y-1 min-w-0">
+                <div className="space-y-1 min-w-0 flex-grow">
                   <span className="text-[9px] tracking-wider font-extrabold px-1.5 py-0.5 rounded bg-[#ffa248] text-[#633307] border border-[#633307]/20">
                     {activeSelectedItem.type === 'amulet' ? 'お守り' : activeSelectedItem.type === 'stamp' ? 'スタンプ' : 'ルーン石'}
                   </span>
                   <h2 className="font-black text-sm sm:text-base text-[#523621] truncate leading-snug">{activeSelectedItem.name}</h2>
                 </div>
+                {/* ログインユーザー向け: 画像プールアタッチ / アップロードボタン */}
+                {user && (
+                  <div className="flex flex-col gap-1 items-end shrink-0">
+                    <button
+                      onClick={() => setShowPoolSelector(true)}
+                      className="px-2 py-1.5 bg-[#523621] hover:bg-[#6c482e] text-[#f5ebd7] font-bold rounded-lg text-[10px] shadow-sm transition-colors cursor-pointer border border-[#8a684b]/30"
+                    >
+                      🖼️ 画像変更
+                    </button>
+                    {activeSelectedItem.image_url && !(activeSelectedItem.report_count && activeSelectedItem.report_count >= 1) && (
+                      <button
+                        onClick={async () => {
+                          const confirmReport = confirm('この画像を不適切なコンテンツとして通報しますか？通報されると即座に確認中に切り替わり、他のユーザーに対して非表示になります。');
+                          if (!confirmReport) return;
+                          try {
+                            const itemRef = doc(db, 'items', activeSelectedItem.id);
+                            await updateDoc(itemRef, {
+                              report_count: increment(1),
+                              reported_by: arrayUnion(user.uid)
+                            });
+                            alert('通報が終了しました。画像は直ちに非表示に設定されました。');
+                          } catch (err) {
+                            console.error('通報エラー:', err);
+                          }
+                        }}
+                        className="px-2 py-1 bg-rose-700 hover:bg-rose-600 text-white font-bold rounded text-[8px] tracking-wider cursor-pointer"
+                      >
+                        🚨 通報
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* ゲーム内の効果テキスト */}
@@ -673,7 +889,7 @@ export default function Album() {
                           }`}
                         >
                           {/* 未所持のハテナマーク */}
-                          {!isOwned && (
+                          {!isOwned && !(item.report_count && item.report_count >= 1) && (
                             <div className={`absolute inset-0 flex items-center justify-center text-white/90 font-black select-none ${
                               colsMode === 'fixed6' ? 'text-4xl' : 'text-6xl'
                             }`}>
@@ -681,22 +897,30 @@ export default function Album() {
                             </div>
                           )}
 
-                          <img 
-                            src={item.image_url} 
-                            alt={item.name}
-                            className={`object-contain transition-all duration-300 ${
-                              colsMode === 'fixed6'
-                                ? 'w-10 h-10 sm:w-11 sm:h-11'
-                                : 'w-20 h-20 sm:w-22 sm:h-22'
-                            } ${
-                              isOwned 
-                                ? 'opacity-100 scale-100 drop-shadow-[0_4px_8px_rgba(0,0,0,0.25)]' 
-                                : 'opacity-10 grayscale brightness-75 scale-95'
-                            }`}
-                            onError={(e) => {
-                              e.currentTarget.style.display = 'none';
-                            }}
-                          />
+                          {/* 通報済み警告ガードの表示 */}
+                          {item.report_count && item.report_count >= 1 ? (
+                            <div className="absolute inset-0 bg-[#ebe0c5] flex flex-col items-center justify-center text-center p-2 border border-rose-300 rounded-xl z-20">
+                              <span className="text-xl">⚠️</span>
+                              <span className="text-[10px] text-rose-700 font-extrabold mt-1">画像確認中</span>
+                            </div>
+                          ) : (
+                            <img 
+                              src={item.image_url} 
+                              alt={item.name}
+                              className={`object-contain transition-all duration-300 ${
+                                colsMode === 'fixed6'
+                                  ? 'w-10 h-10 sm:w-11 sm:h-11'
+                                  : 'w-20 h-20 sm:w-22 sm:h-22'
+                              } ${
+                                isOwned 
+                                  ? 'opacity-100 scale-100 drop-shadow-[0_4px_8px_rgba(0,0,0,0.25)]' 
+                                  : 'opacity-10 grayscale brightness-75 scale-95'
+                              }`}
+                              onError={(e) => {
+                                e.currentTarget.style.display = 'none';
+                              }}
+                            />
+                          )}
 
                           {/* 強化マーク (プラス画像) */}
                           {hasUpgrade && (
@@ -782,22 +1006,29 @@ export default function Album() {
                         </div>
 
                         <div className="relative w-full aspect-square flex items-center justify-center p-1">
-                          <img 
-                            src={item.image_url} 
-                            alt={item.name}
-                            className={`object-contain transition-all duration-300 ${
-                              colsMode === 'fixed6'
-                                ? 'w-10 h-10'
-                                : item.type === 'stamp' ? 'w-18 h-18 sm:w-20 sm:h-20' : 'w-20 h-20 sm:w-22 sm:h-22'
-                            } ${
-                              isOwned 
-                                ? 'opacity-100 scale-100 drop-shadow-[0_4px_10px_rgba(0,0,0,0.15)]' 
-                                : 'opacity-25 grayscale brightness-50 scale-95'
-                            }`}
-                            onError={(e) => {
-                              e.currentTarget.style.display = 'none';
-                            }}
-                          />
+                          {item.report_count && item.report_count >= 1 ? (
+                            <div className="absolute inset-0 bg-[#ebe0c5] flex flex-col items-center justify-center text-center p-1 border border-rose-300 rounded-xl z-20">
+                              <span className="text-sm">⚠️</span>
+                              <span className="text-[8px] text-rose-700 font-extrabold scale-90">画像確認中</span>
+                            </div>
+                          ) : (
+                            <img 
+                              src={item.image_url} 
+                              alt={item.name}
+                              className={`object-contain transition-all duration-300 ${
+                                colsMode === 'fixed6'
+                                  ? 'w-10 h-10'
+                                  : item.type === 'stamp' ? 'w-18 h-18 sm:w-20 sm:h-20' : 'w-20 h-20 sm:w-22 sm:h-22'
+                              } ${
+                                isOwned 
+                                  ? 'opacity-100 scale-100 drop-shadow-[0_4px_10px_rgba(0,0,0,0.15)]' 
+                                  : 'opacity-25 grayscale brightness-50 scale-95'
+                              }`}
+                              onError={(e) => {
+                                e.currentTarget.style.display = 'none';
+                              }}
+                            />
+                          )}
 
                           {/* order番号表示 */}
                           <span className={`absolute bottom-0 left-1 font-mono font-bold text-[#7c7764]/70 ${
@@ -830,6 +1061,122 @@ export default function Album() {
           </div>
         </div>
       </div>
+
+      {/* 画像プール用のモーダルUI（お守り詳細パネルとオーバーレイして出す） */}
+      {showPoolSelector && activeSelectedItem && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-[#f5ebd7] border-4 border-[#8 clearance-custom-outer-frame] border-[#8a684b] rounded-3xl p-6 max-w-2xl w-full max-h-[85vh] flex flex-col relative shadow-2xl">
+            {/* 角丸木枠内のゴールド線 */}
+            <div className="absolute inset-1.5 border border-[#8a684b]/30 rounded-2xl pointer-events-none" />
+
+            <div className="flex justify-between items-center border-b border-[#8a684b]/30 pb-3 z-10">
+              <div>
+                <h3 className="text-sm font-extrabold text-[#523621] uppercase tracking-wide">
+                  🖼️ お守り画像の割り当て
+                </h3>
+                <p className="text-[10px] text-[#7c7764] font-bold">
+                  「{activeSelectedItem.name}」に適用する画像をプールから選択、または直接アップロード
+                </p>
+              </div>
+              <button
+                onClick={() => setShowPoolSelector(false)}
+                className="text-[#8a684b] hover:text-[#523621] text-lg font-black w-8 h-8 rounded-full bg-black/5 flex items-center justify-center cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex-grow overflow-y-auto py-4 space-y-5 z-10">
+              {/* アップロードフォーム */}
+              <div className="bg-[#ebe0c5] border border-[#d6ccb0] rounded-2xl p-4 space-y-3">
+                <span className="text-[10px] text-[#8a684b] font-extrabold tracking-wide block">📤 ローカルよりお守り画像を直接アップロード (2MB以下)</span>
+                
+                <div className="flex items-center gap-3">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleUploadAndAttach}
+                    disabled={uploadProgress === 'uploading'}
+                    className="block w-full text-xs text-[#523621]
+                      file:mr-4 file:py-1.5 file:px-4
+                      file:rounded-xl file:border file:border-[#633307]/20
+                      file:text-xs file:font-semibold
+                      file:bg-gradient-to-b file:from-[#ffd98a] file:to-[#ffa248]
+                      file:text-[#633307] file:cursor-pointer
+                      hover:file:bg-[#ffe09e] transition"
+                  />
+                  {uploadProgress === 'uploading' && (
+                    <span className="text-xs text-[#b06c28] font-bold shrink-0 animate-pulse">WebP圧縮中...</span>
+                  )}
+                </div>
+              </div>
+
+              {/* 画像エクスプローラー（画像プール） */}
+              <div className="space-y-4">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-[#8a684b]/10 pb-2">
+                  <span className="text-[10px] text-[#8a684b] font-extrabold tracking-wide">📂 Storage 内に配備済みの画像プールから紐付け</span>
+                  
+                  {/* is_linked 状態の切り替えトグル */}
+                  <div className="flex items-center gap-1.5 text-[10px] font-bold text-[#8a684b]">
+                    <input
+                      type="checkbox"
+                      id="showAllImagesToggle"
+                      checked={showAllPoolImages}
+                      onChange={(e) => setShowAllPoolImages(e.target.checked)}
+                      className="accent-[#ffa248] cursor-pointer"
+                    />
+                    <label htmlFor="showAllImagesToggle" className="cursor-pointer select-none">
+                      他ので使用中の紐付け済み画像も表示
+                    </label>
+                  </div>
+                </div>
+
+                {imagePool.length === 0 ? (
+                  <div className="text-center py-10 text-[#8a684b] text-xs italic bg-black/5 rounded-xl font-bold">
+                    プール（image_pool）に画像データはありません。
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                    {imagePool
+                      .filter(img => showAllPoolImages ? true : !img.is_linked)
+                      .map((img) => (
+                        <button
+                          key={img.id}
+                          type="button"
+                          onClick={() => handleAttachImage(img)}
+                          className={`p-2 bg-white/40 border hover:border-[#ffa248]/80 hover:bg-[#fffcf7] rounded-xl flex flex-col justify-center items-center gap-1 transition-all group cursor-pointer ${
+                            img.is_linked ? 'opacity-60 border-[#c8c2aa] border-dashed' : 'border-[#c8c2aa]'
+                          }`}
+                        >
+                          <div className="w-12 h-12 flex items-center justify-center p-1 relative">
+                            <img src={img.url} alt={img.fileName} className="w-10 h-10 object-contain text-[8px]" />
+                            {img.is_linked && (
+                              <span className="absolute bottom-0 right-0 bg-gray-500/80 text-white font-extrabold text-[6px] px-1 rounded scale-90">
+                                割当済
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[7px] text-[#8a684b] truncate w-full text-center font-bold">
+                            {img.fileName}
+                          </span>
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            <div className="border-t border-[#8a684b]/30 pt-3 flex justify-end gap-3 z-10">
+              <button
+                onClick={() => setShowPoolSelector(false)}
+                className="px-4 py-2 bg-gradient-to-b from-white to-[#eae5d0] hover:to-[#dfdacc] text-[#523621] font-black rounded-lg text-xs shadow-sm transition-all border border-[#8a684b]/20 cursor-pointer"
+              >
+                キャンセル
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
