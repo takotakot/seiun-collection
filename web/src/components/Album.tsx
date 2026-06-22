@@ -37,6 +37,10 @@ interface Item {
   image_url: string;
   upgrade_from?: string;
   upgrade_to?: string;
+  relates_from?: string;
+  relates_to?: string;
+  recipe_sources?: string[];
+  recipe_target?: string;
   report_count?: number;
   reported_by?: string[];
 }
@@ -336,6 +340,86 @@ export default function Album() {
     return items.find(it => it.itemId === itId);
   };
 
+  // お守りの強化リレーション（動的フォールバック・4->1や特殊進化の考慮）の解決
+  const getUpgradeRelations = (item: Item) => {
+    if (item.type !== 'amulet') return { fromItem: null, toItem: null, fromId: undefined, toId: undefined };
+
+    // 1. DBの定義を優先
+    let fromItemId = item.upgrade_from;
+    let toItemId = item.upgrade_to;
+
+    // 2. DBに定義されていない場合、デフォルトの奇数・偶数のペアでフォールバック
+    if (!fromItemId && !toItemId && !item.relates_from && !item.relates_to) {
+      if (item.order % 2 === 0) {
+        const prevItem = items.find(it => it.type === 'amulet' && it.order === item.order - 1);
+        if (prevItem) {
+          fromItemId = prevItem.itemId;
+        }
+      } else {
+        const nextItem = items.find(it => it.type === 'amulet' && it.order === item.order + 1);
+        if (nextItem) {
+          toItemId = nextItem.itemId;
+        }
+      }
+    }
+
+    const fromItem = fromItemId ? findItemByItemId(fromItemId) : null;
+    const toItem = toItemId ? findItemByItemId(toItemId) : null;
+
+    return { fromItem, toItem, fromId: fromItemId, toId: toItemId };
+  };
+
+  // 特殊な関連（relates_from / relates_to）の解決
+  const getSpecialRelations = (item: Item) => {
+    const fromId = item.relates_from;
+    const toId = item.relates_to;
+    const fromItem = fromId ? findItemByItemId(fromId) : null;
+    const toItem = toId ? findItemByItemId(toId) : null;
+    return { fromItem, toItem, fromId, toId };
+  };
+
+  // 4合体進化（レシピ）の解決
+  const getRecipeRelations = (item: Item) => {
+    // 自身が進化後の場合 (recipe_sources を持っている)
+    const sources = item.recipe_sources ? item.recipe_sources.map(id => ({
+      itemId: id,
+      item: findItemByItemId(id)
+    })) : [];
+
+    // 自身が合体素材の場合 (recipe_target を持っている)
+    const targetId = item.recipe_target;
+    const targetItem = targetId ? findItemByItemId(targetId) : null;
+
+    // 逆引き: 相手がrecipe_sourcesを持っているのに自分がrecipe_targetに指定されていない場合、自動ターゲット解決
+    let autoTargetItem = targetItem;
+    let autoTargetId = targetId;
+    if (!autoTargetItem) {
+      const match = items.find(it => it.recipe_sources && it.recipe_sources.includes(item.itemId));
+      if (match) {
+        autoTargetItem = match;
+        autoTargetId = match.itemId;
+      }
+    }
+
+    // 逆引き: 自身が進化後の場合に、素材側が自分をtargetに指定しているお守りを自動収集
+    let autoSources = [...sources];
+    if (autoSources.length === 0) {
+      const matches = items.filter(it => it.recipe_target === item.itemId);
+      if (matches.length > 0) {
+        autoSources = matches.map(it => ({
+          itemId: it.itemId,
+          item: it
+        }));
+      }
+    }
+
+    return { 
+      sources: autoSources, 
+      targetItem: autoTargetItem, 
+      targetId: autoTargetId 
+    };
+  };
+
   // 画像プールの特定画像をアイテムに紐付ける処理
   const handleAttachImage = async (poolItem: ImagePoolItem) => {
     if (!user) {
@@ -609,44 +693,152 @@ export default function Album() {
                 <p className="text-xs text-[#523621] leading-relaxed font-bold">{activeSelectedItem.effect_text}</p>
               </div>
 
-              {/* 強化ツリー（相互参照） */}
-              {(activeSelectedItem.upgrade_from || activeSelectedItem.upgrade_to) && (
-                <div className="bg-[#ffa248]/10 rounded-2xl border border-[#ffa248]/30 p-3 space-y-1.5 text-[11px]">
-                  <span className="text-[9px] text-[#b06c28] font-extrabold tracking-wide block">💡 強化リレーション</span>
-                  <div className="flex flex-col gap-1.5">
-                    {activeSelectedItem.upgrade_from && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-[#8a684b] font-bold">強化元:</span>
-                        {findItemByItemId(activeSelectedItem.upgrade_from) ? (
-                          <button 
-                            onClick={() => setSelectedItemId(activeSelectedItem.upgrade_from!)}
-                            className="text-[#b06c28] hover:underline font-black text-left"
-                          >
-                            {findItemByItemId(activeSelectedItem.upgrade_from)!.name}
-                          </button>
-                        ) : (
-                          <span className="text-[#8a684b] font-mono text-[10px]">{activeSelectedItem.upgrade_from}</span>
-                        )}
-                      </div>
-                    )}
-                    {activeSelectedItem.upgrade_to && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-[#8a684b] font-bold">強化先:</span>
-                        {findItemByItemId(activeSelectedItem.upgrade_to) ? (
-                          <button 
-                            onClick={() => setSelectedItemId(activeSelectedItem.upgrade_to!)}
-                            className="text-[#b06c28] hover:underline font-black text-left"
-                          >
-                            {findItemByItemId(activeSelectedItem.upgrade_to)!.name}
-                          </button>
-                        ) : (
-                          <span className="text-[#8a684b] font-mono text-[10px]">{activeSelectedItem.upgrade_to}</span>
-                        )}
-                      </div>
-                    )}
+              {/* 強化ツリー（相互参照 / 動的フォールバック解決） */}
+              {(() => {
+                const { fromItem, toItem, fromId, toId } = getUpgradeRelations(activeSelectedItem);
+                if (!fromItem && !toItem && !fromId && !toId) return null;
+                return (
+                  <div className="bg-[#ffa248]/10 rounded-2xl border border-[#ffa248]/30 p-3 space-y-1.5 text-[11px]">
+                    <span className="text-[9px] text-[#b06c28] font-extrabold tracking-wide block">💡 強化リレーション</span>
+                    <div className="flex flex-col gap-1.5">
+                      {(fromItem || fromId) && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-[#8a684b] font-bold">強化元:</span>
+                          {fromItem ? (
+                            <button 
+                              onClick={() => setSelectedItemId(fromItem.itemId)}
+                              className="text-[#b06c28] hover:underline font-black text-left"
+                            >
+                              {fromItem.name}
+                            </button>
+                          ) : (
+                            <span className="text-[#8a684b] font-mono text-[10px]">{fromId}</span>
+                          )}
+                        </div>
+                      )}
+                      {(toItem || toId) && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-[#8a684b] font-bold">強化先:</span>
+                          {toItem ? (
+                            <button 
+                              onClick={() => setSelectedItemId(toItem.itemId)}
+                              className="text-[#b06c28] hover:underline font-black text-left"
+                            >
+                              {toItem.name}
+                            </button>
+                          ) : (
+                            <span className="text-[#8a684b] font-mono text-[10px]">{toId}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
+
+              {/* 関連アイテム（名称変化アップグレード等） */}
+              {(() => {
+                const { fromItem, toItem, fromId, toId } = getSpecialRelations(activeSelectedItem);
+                if (!fromItem && !toItem && !fromId && !toId) return null;
+                return (
+                  <div className="bg-[#8a684b]/10 rounded-2xl border border-[#8a684b]/30 p-3 space-y-1.5 text-[11px]">
+                    <span className="text-[9px] text-[#8a684b] font-extrabold tracking-wide block">💡 関連アイテム</span>
+                    <div className="flex flex-col gap-1.5">
+                      {(fromItem || fromId) && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-[#8a684b] font-bold">関連元:</span>
+                          {fromItem ? (
+                            <button 
+                              onClick={() => setSelectedItemId(fromItem.itemId)}
+                              className="text-[#8a684b] hover:underline font-black text-left"
+                            >
+                              {fromItem.name}
+                            </button>
+                          ) : (
+                            <span className="text-[#8a684b] font-mono text-[10px]">{fromId}</span>
+                          )}
+                        </div>
+                      )}
+                      {(toItem || toId) && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-[#8a684b] font-bold">関連先:</span>
+                          {toItem ? (
+                            <button 
+                              onClick={() => setSelectedItemId(toItem.itemId)}
+                              className="text-[#8a684b] hover:underline font-black text-left"
+                            >
+                              {toItem.name}
+                            </button>
+                          ) : (
+                            <span className="text-[#8a684b] font-mono text-[10px]">{toId}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* 合体レシピ（4対1マージ進化） */}
+              {(() => {
+                const { sources, targetItem, targetId } = getRecipeRelations(activeSelectedItem);
+                const hasSources = sources.length > 0;
+                const hasTarget = !!targetItem || !!targetId;
+                if (!hasSources && !hasTarget) return null;
+
+                return (
+                  <div className="bg-[#47804f]/10 rounded-2xl border border-[#47804f]/30 p-3 space-y-1.5 text-[11px]">
+                    <span className="text-[9px] text-[#47804f] font-extrabold tracking-wide block">💡 合体進化レシピ</span>
+                    <div className="flex flex-col gap-1.5">
+                      {hasTarget && (
+                        <div className="space-y-1">
+                          <span className="text-[#8a684b] font-bold block">4枚集めて合体進化：</span>
+                          <div className="flex justify-between items-center pl-2 border-l-2 border-[#47804f]/30">
+                            {targetItem ? (
+                              <button 
+                                onClick={() => setSelectedItemId(targetItem.itemId)}
+                                className="text-[#47804f] hover:underline font-black text-left font-bold"
+                              >
+                                ✨ {targetItem.name}
+                              </button>
+                            ) : (
+                              <span className="text-[#8a684b] font-mono text-[10px] pl-1">{targetId}</span>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {hasSources && (
+                        <div className="space-y-1">
+                          <span className="text-[#8a684b] font-bold block">合体に必要な素材お守り：</span>
+                          <div className="grid grid-cols-1 gap-1 pl-2 border-l-2 border-[#47804f]/30">
+                            {sources.map((src, idx) => {
+                              const isSrcOwned = src.item ? !!ownedItemsMap[`${src.item.generation}_${src.item.itemId}`] : false;
+                              return (
+                                <div key={src.itemId} className="flex items-center justify-between">
+                                  {src.item ? (
+                                    <button 
+                                      onClick={() => setSelectedItemId(src.itemId)}
+                                      className={`hover:underline font-bold text-left ${isSrcOwned ? 'text-[#346039]' : 'text-[#7c7764] line-through decoration-[#7c7764]/40 opacity-70'}`}
+                                    >
+                                      {idx + 1}. {src.item.name}
+                                    </button>
+                                  ) : (
+                                    <span className="text-[#8a684b] font-mono text-[10px]">{src.itemId}</span>
+                                  )}
+                                  <span className={`text-[9px] px-1 py-0.2 rounded font-extrabold ${isSrcOwned ? 'bg-[#47804f]/15 text-[#346039]' : 'bg-[#7c7764]/10 text-[#7c7764]'}`}>
+                                    {isSrcOwned ? '所持中' : '未所持'}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* 共有攻略メモセクション */}
               <div className="space-y-3 border-t border-[#8a684b]/40 pt-3">
@@ -851,7 +1043,7 @@ export default function Album() {
                   const isOwned = !!ownedItemsMap[`${item.generation}_${item.itemId}`];
                   const isSelected = selectedItemId === item.itemId;
                   const isAmulet = item.type === 'amulet';
-                  const hasUpgrade = !!(item.upgrade_from || item.upgrade_to);
+                  const hasUpgrade = isAmulet && item.order % 2 === 0;
 
                   if (isAmulet) {
                     // お守りカード
