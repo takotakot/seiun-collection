@@ -352,12 +352,11 @@ export default function Album() {
           throw new Error('VERSION_CONFLICT');
         }
 
-        // 新しいデータをセット
+        // 新しいデータをセット（セキュリティーポリシーに準拠するため、updated_by_nameは保存せず、更新者UIDのみ保存する）
         transaction.set(commentDocRef, {
           content: commentText.trim(),
           updated_at: serverTimestamp(),
           updated_by: user.uid,
-          updated_by_name: user.displayName || '名無しプレイヤー',
           version: currentVersion + 1
         });
       });
@@ -701,17 +700,7 @@ export default function Album() {
                   <span className="text-[9px] tracking-wider font-extrabold px-1.5 py-0.5 rounded bg-[#ffa248] text-[#633307] border border-[#633307]/20">
                     {activeSelectedItem.type === 'amulet' ? 'お守り' : activeSelectedItem.type === 'stamp' ? 'スタンプ' : 'ルーン石'}
                   </span>
-                  {isEditingDetails ? (
-                    <input
-                      type="text"
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                      placeholder="名前を入力してください"
-                      className="w-full bg-[#ebe0c5] border border-[#d6ccb0] hover:border-[#bdae8c] text-[#523621] rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-[#ffa248]/20 font-bold mt-1"
-                    />
-                  ) : (
-                    <h2 className="font-black text-sm sm:text-base text-[#523621] truncate leading-snug">{activeSelectedItem.name}</h2>
-                  )}
+                  <h2 className="font-black text-sm sm:text-base text-[#523621] truncate leading-snug">{activeSelectedItem.name}</h2>
                 </div>
                 {/* ログインユーザー向け: 画像プールアタッチ / アップロードボタン */}
                 {user && !isEditingDetails && (
@@ -763,11 +752,141 @@ export default function Album() {
                 )}
               </div>
 
-              {/* ゲーム内の効果テキスト */}
-              <div className="bg-[#ebe0c5] border border-[#d6ccb0] rounded-2xl p-3.5 space-y-1 shadow-inner">
-                <span className="text-[9px] text-[#8a684b] font-extrabold tracking-wide block">効果・説明文</span>
-                <p className="text-xs text-[#523621] leading-relaxed font-bold">{activeSelectedItem.effect_text}</p>
-              </div>
+              {/* 情報編集モード時の入力項目 (お守り名、効果・説明文、各種リレーション) */}
+              {isEditingDetails ? (
+                <div className="bg-[#ebe0c5] border border-[#d6ccb0] rounded-2xl p-4 space-y-3.5 shadow-inner text-xs">
+                  <div className="text-[11px] text-[#523621] font-black border-b border-[#8a684b]/30 pb-1.5 flex items-center gap-1">
+                    📝 お守り情報の編集
+                  </div>
+                  
+                  {/* お守り名入力 */}
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-[#8a684b] font-extrabold block">お守り・アイテム名</label>
+                    <input
+                      type="text"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      placeholder="お守り名を入力してください"
+                      className="w-full bg-[#f5ebd7] border border-[#d6ccb0] hover:border-[#bdae8c] text-[#523621] rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-[#ffa248]/20 font-bold"
+                    />
+                  </div>
+
+                  {/* 効果・説明文入力 */}
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-[#8a684b] font-extrabold block">効果・説明文</label>
+                    <textarea
+                      value={editEffectText}
+                      onChange={(e) => setEditEffectText(e.target.value)}
+                      placeholder="ゲーム内の効果や説明文を入力してください"
+                      className="w-full h-24 bg-[#f5ebd7] border border-[#d6ccb0] hover:border-[#bdae8c] text-[#523621] rounded-lg p-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-[#ffa248]/20 font-semibold resize-none leading-relaxed"
+                    />
+                  </div>
+
+                  {/* 強化・関連入力フォーム */}
+                  <div className="space-y-2 border-t border-[#8a684b]/20 pt-2">
+                    <span className="text-[10px] text-[#8a684b] font-extrabold tracking-wide block">🔗 強化リレーション・関連設定</span>
+                    
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[9px] text-[#8a684b] font-bold block mb-0.5">強化元 (upgrade_from)</label>
+                        <select
+                          value={editUpgradeFrom}
+                          onChange={(e) => setEditUpgradeFrom(e.target.value)}
+                          className="w-full bg-[#f5ebd7] border border-[#d6ccb0] text-[#523621] rounded-md px-1.5 py-1.5 text-[11px] focus:outline-none font-semibold font-mono cursor-pointer"
+                        >
+                          <option value="">(なし)</option>
+                          {items.map((it) => (
+                            <option key={it.id} value={it.itemId}>
+                              {it.type === 'amulet' ? '🧿' : it.type === 'stamp' ? '💮' : '🌀'} {it.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[9px] text-[#8a684b] font-bold block mb-0.5">強化先 (upgrade_to)</label>
+                        <select
+                          value={editUpgradeTo}
+                          onChange={(e) => setEditUpgradeTo(e.target.value)}
+                          className="w-full bg-[#f5ebd7] border border-[#d6ccb0] text-[#523621] rounded-md px-1.5 py-1.5 text-[11px] focus:outline-none font-semibold font-mono cursor-pointer"
+                        >
+                          <option value="">(なし)</option>
+                          {items.map((it) => (
+                            <option key={it.id} value={it.itemId}>
+                              {it.type === 'amulet' ? '🧿' : it.type === 'stamp' ? '💮' : '🌀'} {it.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[9px] text-[#8a684b] font-bold block mb-0.5">関連元 (relates_from)</label>
+                        <select
+                          value={editRelatesFrom}
+                          onChange={(e) => setEditRelatesFrom(e.target.value)}
+                          className="w-full bg-[#f5ebd7] border border-[#d6ccb0] text-[#523621] rounded-md px-1.5 py-1.5 text-[11px] focus:outline-none font-semibold font-mono cursor-pointer"
+                        >
+                          <option value="">(なし)</option>
+                          {items.map((it) => (
+                            <option key={it.id} value={it.itemId}>
+                              {it.type === 'amulet' ? '🧿' : it.type === 'stamp' ? '💮' : '🌀'} {it.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[9px] text-[#8a684b] font-bold block mb-0.5">関連先 (relates_to)</label>
+                        <select
+                          value={editRelatesTo}
+                          onChange={(e) => setEditRelatesTo(e.target.value)}
+                          className="w-full bg-[#f5ebd7] border border-[#d6ccb0] text-[#523621] rounded-md px-1.5 py-1.5 text-[11px] focus:outline-none font-semibold font-mono cursor-pointer"
+                        >
+                          <option value="">(なし)</option>
+                          {items.map((it) => (
+                            <option key={it.id} value={it.itemId}>
+                              {it.type === 'amulet' ? '🧿' : it.type === 'stamp' ? '💮' : '🌀'} {it.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  {detailErrorMessage && (
+                    <div className="text-[10px] text-rose-700 font-bold leading-relaxed pt-1">
+                      ⚠️ {detailErrorMessage}
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#8a684b]/20">
+                    {detailSaveStatus === 'success' && (
+                      <span className="text-[10px] text-green-700 font-bold flex items-center">✓ 保存完了</span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingDetails(false)}
+                      className="px-2.5 py-1.5 bg-[#2d2654]/10 hover:bg-[#2d2654]/20 text-[#523621] font-bold rounded-lg text-xs transition-colors cursor-pointer"
+                    >
+                      キャンセル
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveDetails}
+                      disabled={detailSaveStatus === 'saving'}
+                      className="px-4 py-1.5 bg-gradient-to-b from-[#ffd98a] to-[#ffa248] hover:from-[#ffe09e] hover:to-[#ffb260] text-[#633307] font-black rounded-lg text-xs shadow-md transition-colors cursor-pointer border border-[#633307]/20"
+                    >
+                      {detailSaveStatus === 'saving' ? '保存中...' : 'お守り情報を一括保存'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* ゲーム内の効果テキスト */
+                <div className="bg-[#ebe0c5] border border-[#d6ccb0] rounded-2xl p-3.5 space-y-2 shadow-inner">
+                  <span className="text-[9px] text-[#8a684b] font-extrabold tracking-wide block">効果・説明文</span>
+                  <p className="text-xs text-[#523621] leading-relaxed font-bold">{activeSelectedItem.effect_text}</p>
+                </div>
+              )}
 
               {/* 強化ツリー（相互参照 / 動的フォールバック解決） */}
               {(() => {
@@ -929,10 +1048,12 @@ export default function Album() {
                   )}
                 </div>
 
-                {/* 前回の更新者メタ情報 */}
-                {activeComment && activeComment.updated_by_name && (
+                {/* 前回の更新者メタ情報（一般ユーザーに他のユーザー名が漏洩しないよう、UIDのみ表示。ログインユーザー自身の場合は「あなた」） */}
+                {activeComment && activeComment.updated_by && (
                   <div className="text-[10px] text-[#8a684b] font-bold">
-                    最終更新: <span className="text-[#523621]">{activeComment.updated_by_name}</span> 
+                    最終更新: <span className="text-[#523621]">
+                      {user && activeComment.updated_by === user.uid ? 'あなた' : `UID: ${activeComment.updated_by}`}
+                    </span> 
                     {activeComment.updated_at && (
                       <span className="font-normal text-[#8a684b]/80"> ({new Date(activeComment.updated_at.toMillis ? activeComment.updated_at.toMillis() : activeComment.updated_at).toLocaleString('ja-JP', { dateStyle: 'short', timeStyle: 'short' })})</span>
                     )}
