@@ -923,7 +923,7 @@ export default function Album() {
 
         {/* デスクトップ用カテゴリ切り替えタブ */}
         <div className="hidden lg:flex flex-col gap-2.5">
-          <div className="text-xs text-indigo-300 font-bold mb-1 font-game">カテゴリ切り替え</div>
+          <div className="text-xs text-[#3b2718] font-bold mb-1 font-game">カテゴリ切り替え</div>
           {(['amulet', 'stamp', 'rune'] as const).map((tab) => {
             const label = tab === 'amulet' ? '🧿 お守り' : tab === 'stamp' ? '💮 スタンプ' : '🌀 ルーン石';
             const isActive = activeTab === tab;

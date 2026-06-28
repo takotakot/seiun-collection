@@ -5,13 +5,14 @@
 }
 
 body {
-  background-color: #070504;
+  background-color: #a0c975;
   background-image: 
-    radial-gradient(circle at 50% 0%, #201712 0%, #070504 100%),
-    linear-gradient(to bottom, rgba(255, 230, 180, 0.04) 0%, transparent 60%);
+    radial-gradient(circle at 50% 0%, #cde6a5 0%, #a0c975 50%, #7baf51 100%),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.2) 0%, transparent 60%);
   background-size: 100% 100%, 100% 100%;
   background-repeat: no-repeat, no-repeat;
-  color: #f9fafb;
+  background-attachment: fixed, fixed;
+  color: #2d1a11;
   font-family: var(--font-game);
 }
 
