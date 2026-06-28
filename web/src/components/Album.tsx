@@ -86,6 +86,56 @@ export default function Album() {
   const [showAllPoolImages, setShowAllPoolImages] = useState(false);
   const [uploadProgress, setUploadStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
 
+  // 詳細情報編集用の状態
+  const [isEditingDetails, setIsEditingDetails] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editEffectText, setEditEffectText] = useState('');
+  const [editUpgradeFrom, setEditUpgradeFrom] = useState('');
+  const [editUpgradeTo, setEditUpgradeTo] = useState('');
+  const [editRelatesFrom, setEditRelatesFrom] = useState('');
+  const [editRelatesTo, setEditRelatesTo] = useState('');
+  const [detailSaveStatus, setDetailSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
+  const [detailErrorMessage, setDetailErrorMessage] = useState('');
+
+  // 詳細情報の保存処理
+  const handleSaveDetails = async () => {
+    if (!user) {
+      setDetailErrorMessage('情報の編集にはログインが必要です。');
+      return;
+    }
+    if (!activeSelectedItem) return;
+    if (!editName.trim()) {
+      setDetailErrorMessage('名前を入力してください。');
+      return;
+    }
+
+    setDetailSaveStatus('saving');
+    setDetailErrorMessage('');
+
+    try {
+      const itemRef = doc(db, 'items', activeSelectedItem.id);
+      const updateData: any = {
+        name: editName.trim(),
+        effect_text: editEffectText.trim(),
+        upgrade_from: editUpgradeFrom || '',
+        upgrade_to: editUpgradeTo || '',
+        relates_from: editRelatesFrom || '',
+        relates_to: editRelatesTo || ''
+      };
+
+      await updateDoc(itemRef, updateData);
+      setDetailSaveStatus('success');
+      setTimeout(() => {
+        setDetailSaveStatus('idle');
+        setIsEditingDetails(false);
+      }, 1000);
+    } catch (err: any) {
+      console.error('詳細情報の保存失敗:', err);
+      setDetailSaveStatus('error');
+      setDetailErrorMessage('情報の保存中にエラーが発生しました。時間を置いて再度お試しください。');
+    }
+  };
+
   // 1. Google 認証
   const handleLogin = async () => {
     const provider = new GoogleAuthProvider();
@@ -651,16 +701,42 @@ export default function Album() {
                   <span className="text-[9px] tracking-wider font-extrabold px-1.5 py-0.5 rounded bg-[#ffa248] text-[#633307] border border-[#633307]/20">
                     {activeSelectedItem.type === 'amulet' ? 'お守り' : activeSelectedItem.type === 'stamp' ? 'スタンプ' : 'ルーン石'}
                   </span>
-                  <h2 className="font-black text-sm sm:text-base text-[#523621] truncate leading-snug">{activeSelectedItem.name}</h2>
+                  {isEditingDetails ? (
+                    <input
+                      type="text"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      placeholder="名前を入力してください"
+                      className="w-full bg-[#ebe0c5] border border-[#d6ccb0] hover:border-[#bdae8c] text-[#523621] rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-[#ffa248]/20 font-bold mt-1"
+                    />
+                  ) : (
+                    <h2 className="font-black text-sm sm:text-base text-[#523621] truncate leading-snug">{activeSelectedItem.name}</h2>
+                  )}
                 </div>
                 {/* ログインユーザー向け: 画像プールアタッチ / アップロードボタン */}
-                {user && (
+                {user && !isEditingDetails && (
                   <div className="flex flex-col gap-1 items-end shrink-0">
                     <button
                       onClick={() => setShowPoolSelector(true)}
                       className="px-2 py-1.5 bg-[#523621] hover:bg-[#6c482e] text-[#f5ebd7] font-bold rounded-lg text-[10px] shadow-sm transition-colors cursor-pointer border border-[#8a684b]/30"
                     >
                       🖼️ 画像変更
+                    </button>
+                    <button
+                      onClick={() => {
+                        setEditName(activeSelectedItem.name || '');
+                        setEditEffectText(activeSelectedItem.effect_text || '');
+                        setEditUpgradeFrom(activeSelectedItem.upgrade_from || '');
+                        setEditUpgradeTo(activeSelectedItem.upgrade_to || '');
+                        setEditRelatesFrom(activeSelectedItem.relates_from || '');
+                        setEditRelatesTo(activeSelectedItem.relates_to || '');
+                        setDetailSaveStatus('idle');
+                        setDetailErrorMessage('');
+                        setIsEditingDetails(true);
+                      }}
+                      className="px-2 py-1.5 bg-[#523621] hover:bg-[#6c482e] text-[#f5ebd7] font-bold rounded-lg text-[10px] shadow-sm transition-colors cursor-pointer border border-[#8a684b]/30"
+                    >
+                      📝 情報編集
                     </button>
                     {activeSelectedItem.image_url && !(activeSelectedItem.report_count && activeSelectedItem.report_count >= 1) && (
                       <button
