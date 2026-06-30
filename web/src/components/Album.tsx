@@ -530,43 +530,53 @@ export default function Album() {
     setUploadStatus('uploading');
 
     try {
-      // Browser Canvas を使ったクライアント側での画像自動リサイズ & WebP超トランスパイル (50KB前後)
-      const compressedBlob = await new Promise<Blob>((resolve, reject) => {
-        const img = new Image();
-        img.src = URL.createObjectURL(file);
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          const maxDim = 480; // お守り表示用に最大横幅・縦幅を480pxに制限
-          let w = img.width;
-          let h = img.height;
+      let compressedBlob: Blob;
 
-          if (w > maxDim || h > maxDim) {
-            if (w > h) {
-              h = Math.round((h * maxDim) / w);
-              w = maxDim;
-            } else {
-              w = Math.round((w * maxDim) / h);
-              h = maxDim;
+      // すでにWebP形式であり、かつ150KB以下であれば、再圧縮をスキップしてそのままアップロード
+      const isWebP = file.type === 'image/webp' || file.name.toLowerCase().endsWith('.webp');
+      const SKIP_COMPRESS_SIZE_LIMIT = 150 * 1024; // 150KB
+
+      if (isWebP && file.size <= SKIP_COMPRESS_SIZE_LIMIT) {
+        compressedBlob = file;
+      } else {
+        // Browser Canvas を使ったクライアント側での画像自動リサイズ & WebP超トランスパイル (50KB前後)
+        compressedBlob = await new Promise<Blob>((resolve, reject) => {
+          const img = new Image();
+          img.src = URL.createObjectURL(file);
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const maxDim = 480; // お守り表示用に最大横幅・縦幅を480pxに制限
+            let w = img.width;
+            let h = img.height;
+
+            if (w > maxDim || h > maxDim) {
+              if (w > h) {
+                h = Math.round((h * maxDim) / w);
+                w = maxDim;
+              } else {
+                w = Math.round((w * maxDim) / h);
+                h = maxDim;
+              }
             }
-          }
 
-          canvas.width = w;
-          canvas.height = h;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) {
-            reject(new Error('Canvas context failed'));
-            return;
-          }
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+              reject(new Error('Canvas context failed'));
+              return;
+            }
 
-          ctx.drawImage(img, 0, 0, w, h);
-          // 高圧縮率 0.82 の WebP に変換して超軽量化
-          canvas.toBlob((blob) => {
-            if (blob) resolve(blob);
-            else reject(new Error('Blob convert failed'));
-          }, 'image/webp', 0.82);
-        };
-        img.onerror = () => reject(new Error('Image load failed'));
-      });
+            ctx.drawImage(img, 0, 0, w, h);
+            // 高圧縮率 0.82 の WebP に変換して超軽量化
+            canvas.toBlob((blob) => {
+              if (blob) resolve(blob);
+              else reject(new Error('Blob convert failed'));
+            }, 'image/webp', 0.82);
+          };
+          img.onerror = () => reject(new Error('Image load failed'));
+        });
+      }
 
       // Storage用のグローバル一意なフラットパス作成
       const uniqueId = crypto.randomUUID();
@@ -604,7 +614,7 @@ export default function Album() {
       });
 
       setUploadStatus('success');
-      alert('画像をWebP圧縮してアップロードし、お守りへのアタッチが成功しました！');
+      alert('画像をアップロードし、お守りへのアタッチが成功しました！');
       setShowPoolSelector(false);
       setTimeout(() => setUploadStatus('idle'), 3000);
     } catch (err) {
