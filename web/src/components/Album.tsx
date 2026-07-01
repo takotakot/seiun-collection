@@ -1289,15 +1289,6 @@ export default function Album() {
                               : 'bg-[#d6d0b9]'
                           }`}
                         >
-                          {/* 未所持のハテナマーク */}
-                          {!isOwned && !(item.report_count && item.report_count >= 1) && (
-                            <div className={`absolute inset-0 flex items-center justify-center text-white/90 font-black select-none ${
-                              colsMode === 'fixed6' ? 'text-4xl' : 'text-6xl'
-                            }`}>
-                              ?
-                            </div>
-                          )}
-
                           {/* 通報済み警告ガードの表示 */}
                           {item.report_count && item.report_count >= 1 ? (
                             <div className="absolute inset-0 bg-[#ebe0c5] flex flex-col items-center justify-center text-center p-2 border border-rose-300 rounded-xl z-20">
@@ -1311,7 +1302,7 @@ export default function Album() {
                               className={`w-full h-full object-contain transition-all duration-300 ${
                                 isOwned 
                                   ? 'opacity-100 scale-100 drop-shadow-[0_4px_8px_rgba(0,0,0,0.25)]' 
-                                  : 'opacity-10 grayscale brightness-75 scale-95'
+                                  : 'opacity-85 scale-100 drop-shadow-[0_2px_4px_rgba(0,0,0,0.15)]'
                               }`}
                               onError={(e) => {
                                 e.currentTarget.style.display = 'none';
@@ -1330,7 +1321,7 @@ export default function Album() {
                                 className={`object-contain w-full h-full transition-all duration-200 ${
                                   isOwned 
                                     ? 'opacity-100 drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)]' 
-                                    : 'opacity-40 grayscale'
+                                    : 'opacity-40'
                                 }`} 
                               />
                             </div>
@@ -1415,7 +1406,7 @@ export default function Album() {
                               className={`w-full h-full object-contain transition-all duration-300 ${
                                 isOwned 
                                   ? 'opacity-100 scale-100 drop-shadow-[0_4px_10px_rgba(0,0,0,0.15)]' 
-                                  : 'opacity-25 grayscale brightness-50 scale-95'
+                                  : 'opacity-60 scale-100'
                               }`}
                               onError={(e) => {
                                 e.currentTarget.style.display = 'none';
