@@ -1279,9 +1279,11 @@ export default function Album() {
                           />
                         </div>
 
-                        {/* 画像エリア (所持時は緑グラデ、未所持時はベージュ) */}
+                        {/* 画像エリア (所持時は緑グラデ、未所持時はベージュ) - 枠いっぱいに表示されるようパディングを調整 */}
                         <div 
-                          className={`relative aspect-square w-full flex items-center justify-center p-3 overflow-hidden transition-all ${
+                          className={`relative aspect-square w-full flex items-center justify-center ${
+                            colsMode === 'fixed6' ? 'p-1.5' : 'p-2.5'
+                          } overflow-hidden transition-all ${
                             isOwned 
                               ? 'bg-gradient-to-b from-[#64a56c] to-[#47804f]' 
                               : 'bg-[#d6d0b9]'
@@ -1306,11 +1308,7 @@ export default function Album() {
                             <img 
                               src={item.image_url} 
                               alt={item.name}
-                              className={`object-contain transition-all duration-300 ${
-                                colsMode === 'fixed6'
-                                  ? 'w-10 h-10 sm:w-11 sm:h-11'
-                                  : 'w-20 h-20 sm:w-22 sm:h-22'
-                              } ${
+                              className={`w-full h-full object-contain transition-all duration-300 ${
                                 isOwned 
                                   ? 'opacity-100 scale-100 drop-shadow-[0_4px_8px_rgba(0,0,0,0.25)]' 
                                   : 'opacity-10 grayscale brightness-75 scale-95'
@@ -1414,11 +1412,7 @@ export default function Album() {
                             <img 
                               src={item.image_url} 
                               alt={item.name}
-                              className={`object-contain transition-all duration-300 ${
-                                colsMode === 'fixed6'
-                                  ? 'w-10 h-10'
-                                  : item.type === 'stamp' ? 'w-18 h-18 sm:w-20 sm:h-20' : 'w-20 h-20 sm:w-22 sm:h-22'
-                              } ${
+                              className={`w-full h-full object-contain transition-all duration-300 ${
                                 isOwned 
                                   ? 'opacity-100 scale-100 drop-shadow-[0_4px_10px_rgba(0,0,0,0.15)]' 
                                   : 'opacity-25 grayscale brightness-50 scale-95'
