@@ -22,7 +22,7 @@ import {
   increment,
   arrayUnion
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL, getMetadata } from 'firebase/storage';
 import { db, auth, storage } from '../lib/firebase';
 import plusIcon from '../assets/plus.webp';
 
@@ -585,9 +585,28 @@ export default function Album() {
 
       setUploadStage('uploading');
 
-      // Storage用のグローバル一意なフラットパス作成
-      const uniqueId = crypto.randomUUID();
-      const storagePath = `item-images/${uniqueId}.webp`;
+      // 元ファイル名を尊重した Storage パスを生成（重複時のみ UUID サフィックス付与）
+      const rawName = file.name.replace(/\.[^.]+$/, ''); // 拡張子を除去
+      const sanitizedBase = rawName
+        .replace(/[/\\#?%&=+<>{}|^~\[\]`]/g, '_') // Storage 非推奨文字を置換
+        .replace(/\s+/g, '_')  // スペースをアンダースコアに
+        .replace(/_+/g, '_')   // 連続アンダースコアを統合
+        .replace(/^_|_$/g, '') // 先頭・末尾のアンダースコア除去
+        || 'image';            // 空文字フォールバック
+
+      // 同名ファイルの存在チェック（getMetadata が成功すれば既存）
+      let finalName = `${sanitizedBase}.webp`;
+      const candidateRef = ref(storage, `item-images/${finalName}`);
+      try {
+        await getMetadata(candidateRef);
+        // 既存ファイルあり → 短い UUID サフィックスを付与して衝突回避
+        const shortId = crypto.randomUUID().slice(0, 8);
+        finalName = `${sanitizedBase}_${shortId}.webp`;
+      } catch {
+        // storage/object-not-found → 名前が使えるのでそのまま
+      }
+
+      const storagePath = `item-images/${finalName}`;
       const fileRef = ref(storage, storagePath);
 
       // Storage バケットへトランスパイルデータを転送
@@ -598,12 +617,15 @@ export default function Album() {
       // ダウンロードリンクをフェッチ
       const downloadUrl = await getDownloadURL(fileRef);
 
+      // image_pool ドキュメント ID 用の一意キー（拡張子なし）
+      const docId = finalName.replace(/\.webp$/, '');
+
       setUploadStage('saving');
 
       // Firestoreを一括アトミック更新
       await runTransaction(db, async (transaction) => {
         const itemRef = doc(db, 'items', currentItem.id);
-        const poolItemRef = doc(db, 'image_pool', uniqueId);
+        const poolItemRef = doc(db, 'image_pool', docId);
 
         // items の画像指定
         transaction.update(itemRef, {
@@ -614,8 +636,8 @@ export default function Album() {
 
         // image_pool に画像情報をプール登録 (is_linked=true, 指定アイテム紐付け)
         transaction.set(poolItemRef, {
-          id: uniqueId,
-          fileName: `${uniqueId}.webp`,
+          id: docId,
+          fileName: finalName,
           url: downloadUrl,
           is_linked: true,
           target_item_id: currentItem.id
