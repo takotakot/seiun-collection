@@ -85,6 +85,7 @@ export default function Album() {
   const [showPoolSelector, setShowPoolSelector] = useState(false);
   const [showAllPoolImages, setShowAllPoolImages] = useState(false);
   const [uploadStage, setUploadStage] = useState<'idle' | 'compressing' | 'uploading' | 'saving' | 'success' | 'error'>('idle');
+  const [updateRelatedImages, setUpdateRelatedImages] = useState(true);
 
   // 詳細情報編集用の状態
   const [isEditingDetails, setIsEditingDetails] = useState(false);
@@ -418,6 +419,26 @@ export default function Album() {
     return { fromItem, toItem, fromId: fromItemId, toId: toItemId };
   };
 
+  // 強化リレーションチェーンを辿って、接続されたすべてのアイテムを収集する
+  const getUpgradeChainItems = (startItem: Item): Item[] => {
+    const visited = new Set<string>();
+    const chain: Item[] = [];
+
+    const traverse = (item: Item) => {
+      if (visited.has(item.itemId)) return;
+      visited.add(item.itemId);
+      chain.push(item);
+
+      const { fromItem, toItem } = getUpgradeRelations(item);
+      if (fromItem) traverse(fromItem);
+      if (toItem) traverse(toItem);
+    };
+
+    traverse(startItem);
+    // 自分自身を除外して返す
+    return chain.filter(it => it.itemId !== startItem.itemId);
+  };
+
   // 特殊な関連（relates_from / relates_to）の解決
   const getSpecialRelations = (item: Item) => {
     const fromId = item.relates_from;
@@ -481,6 +502,9 @@ export default function Album() {
     if (!currentItem) return;
 
     try {
+      // 強化リレーション先も更新する場合、対象アイテムを収集
+      const relatedItems = updateRelatedImages ? getUpgradeChainItems(currentItem) : [];
+
       await runTransaction(db, async (transaction) => {
         const itemRef = doc(db, 'items', currentItem.id);
         const poolItemRef = doc(db, 'image_pool', poolItem.id);
@@ -497,9 +521,22 @@ export default function Album() {
           is_linked: true,
           target_item_id: currentItem.id
         });
+
+        // 強化リレーション先のアイテムも同じ画像に更新
+        for (const related of relatedItems) {
+          const relatedRef = doc(db, 'items', related.id);
+          transaction.update(relatedRef, {
+            image_url: poolItem.url,
+            uploaded_by: user.uid,
+            uploaded_at: serverTimestamp()
+          });
+        }
       });
 
-      alert('プールの画像をお守りにアタッチしました！');
+      const relatedMsg = relatedItems.length > 0
+        ? `\n（強化リレーション先 ${relatedItems.length}件 も同時更新しました）`
+        : '';
+      alert(`プールの画像をお守りにアタッチしました！${relatedMsg}`);
       setShowPoolSelector(false);
     } catch (err) {
       console.error('画像アタッチエラー:', err);
@@ -622,6 +659,9 @@ export default function Album() {
 
       setUploadStage('saving');
 
+      // 強化リレーション先も更新する場合、対象アイテムを収集
+      const relatedItems = updateRelatedImages ? getUpgradeChainItems(currentItem) : [];
+
       // Firestoreを一括アトミック更新
       await runTransaction(db, async (transaction) => {
         const itemRef = doc(db, 'items', currentItem.id);
@@ -642,10 +682,23 @@ export default function Album() {
           is_linked: true,
           target_item_id: currentItem.id
         });
+
+        // 強化リレーション先のアイテムも同じ画像に更新
+        for (const related of relatedItems) {
+          const relatedRef = doc(db, 'items', related.id);
+          transaction.update(relatedRef, {
+            image_url: downloadUrl,
+            uploaded_by: user.uid,
+            uploaded_at: serverTimestamp()
+          });
+        }
       });
 
       setUploadStage('success');
-      alert('画像をアップロードし、お守りへのアタッチが成功しました！');
+      const relatedMsg = relatedItems.length > 0
+        ? `\n（強化リレーション先 ${relatedItems.length}件 も同時更新しました）`
+        : '';
+      alert(`画像をアップロードし、お守りへのアタッチが成功しました！${relatedMsg}`);
       setShowPoolSelector(false);
       setTimeout(() => setUploadStage('idle'), 3000);
     } catch (err: any) {
@@ -1502,6 +1555,31 @@ export default function Album() {
             </div>
 
             <div className="flex-grow overflow-y-auto py-4 space-y-5 z-10">
+              {/* 強化リレーション先の画像も更新するチェックボックス */}
+              {(() => {
+                const chainItems = getUpgradeChainItems(activeSelectedItem);
+                if (chainItems.length === 0) return null;
+                return (
+                  <div className="bg-[#ffa248]/10 border border-[#ffa248]/30 rounded-2xl p-3 space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id="updateRelatedImagesToggle"
+                        checked={updateRelatedImages}
+                        onChange={(e) => setUpdateRelatedImages(e.target.checked)}
+                        className="accent-[#ffa248] cursor-pointer w-4 h-4"
+                      />
+                      <label htmlFor="updateRelatedImagesToggle" className="text-[11px] text-[#523621] font-extrabold cursor-pointer select-none">
+                        💡 強化リレーション先の画像も更新する
+                      </label>
+                    </div>
+                    <div className="text-[9px] text-[#8a684b] font-bold pl-6 leading-relaxed">
+                      対象: {chainItems.map(it => it.name).join('、')}
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* アップロードフォーム */}
               <div className="bg-[#ebe0c5] border border-[#d6ccb0] rounded-2xl p-4 space-y-3">
                 <span className="text-[10px] text-[#8a684b] font-extrabold tracking-wide block">📤 ローカルよりお守り画像を直接アップロード (2MB以下)</span>
