@@ -84,7 +84,7 @@ export default function Album() {
   const [imagePool, setImagePool] = useState<ImagePoolItem[]>([]);
   const [showPoolSelector, setShowPoolSelector] = useState(false);
   const [showAllPoolImages, setShowAllPoolImages] = useState(false);
-  const [uploadProgress, setUploadStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
+  const [uploadStage, setUploadStage] = useState<'idle' | 'compressing' | 'uploading' | 'saving' | 'success' | 'error'>('idle');
 
   // 詳細情報編集用の状態
   const [isEditingDetails, setIsEditingDetails] = useState(false);
@@ -527,7 +527,7 @@ export default function Album() {
       return;
     }
 
-    setUploadStatus('uploading');
+    setUploadStage('compressing');
 
     try {
       let compressedBlob: Blob;
@@ -542,8 +542,10 @@ export default function Album() {
         // Browser Canvas を使ったクライアント側での画像自動リサイズ & WebP超トランスパイル (50KB前後)
         compressedBlob = await new Promise<Blob>((resolve, reject) => {
           const img = new Image();
-          img.src = URL.createObjectURL(file);
+          const objectUrl = URL.createObjectURL(file);
+          img.src = objectUrl;
           img.onload = () => {
+            URL.revokeObjectURL(objectUrl);
             const canvas = document.createElement('canvas');
             const maxDim = 480; // お守り表示用に最大横幅・縦幅を480pxに制限
             let w = img.width;
@@ -571,12 +573,17 @@ export default function Album() {
             // 高圧縮率 0.82 の WebP に変換して超軽量化
             canvas.toBlob((blob) => {
               if (blob) resolve(blob);
-              else reject(new Error('Blob convert failed'));
+              else reject(new Error('WebP Blob への変換に失敗しました。'));
             }, 'image/webp', 0.82);
           };
-          img.onerror = () => reject(new Error('Image load failed'));
+          img.onerror = () => {
+            URL.revokeObjectURL(objectUrl);
+            reject(new Error('画像の読み込みに失敗しました。ファイル形式または画像データをご確認ください。'));
+          };
         });
       }
+
+      setUploadStage('uploading');
 
       // Storage用のグローバル一意なフラットパス作成
       const uniqueId = crypto.randomUUID();
@@ -590,6 +597,8 @@ export default function Album() {
 
       // ダウンロードリンクをフェッチ
       const downloadUrl = await getDownloadURL(fileRef);
+
+      setUploadStage('saving');
 
       // Firestoreを一括アトミック更新
       await runTransaction(db, async (transaction) => {
@@ -613,14 +622,14 @@ export default function Album() {
         });
       });
 
-      setUploadStatus('success');
+      setUploadStage('success');
       alert('画像をアップロードし、お守りへのアタッチが成功しました！');
       setShowPoolSelector(false);
-      setTimeout(() => setUploadStatus('idle'), 3000);
-    } catch (err) {
+      setTimeout(() => setUploadStage('idle'), 3000);
+    } catch (err: any) {
       console.error('アップロード・紐付け失敗:', err);
-      setUploadStatus('error');
-      alert('画像のアップロードまたは紐付けに失敗しました。');
+      setUploadStage('error');
+      alert(`画像のアップロードまたは紐付けに失敗しました:\n${err?.message || err}`);
     }
   };
 
@@ -1480,7 +1489,7 @@ export default function Album() {
                     type="file"
                     accept="image/*"
                     onChange={handleUploadAndAttach}
-                    disabled={uploadProgress === 'uploading'}
+                    disabled={uploadStage === 'compressing' || uploadStage === 'uploading' || uploadStage === 'saving'}
                     className="block w-full text-xs text-[#523621]
                       file:mr-4 file:py-1.5 file:px-4
                       file:rounded-xl file:border file:border-[#633307]/20
@@ -1489,8 +1498,14 @@ export default function Album() {
                       file:text-[#633307] file:cursor-pointer
                       hover:file:bg-[#ffe09e] transition"
                   />
-                  {uploadProgress === 'uploading' && (
+                  {uploadStage === 'compressing' && (
                     <span className="text-xs text-[#b06c28] font-bold shrink-0 animate-pulse">WebP圧縮中...</span>
+                  )}
+                  {uploadStage === 'uploading' && (
+                    <span className="text-xs text-[#b06c28] font-bold shrink-0 animate-pulse">Storage送信中...</span>
+                  )}
+                  {uploadStage === 'saving' && (
+                    <span className="text-xs text-[#b06c28] font-bold shrink-0 animate-pulse">DB紐付け中...</span>
                   )}
                 </div>
               </div>
