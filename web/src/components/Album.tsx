@@ -1381,6 +1381,7 @@ export default function Album() {
                             </div>
                           ) : (
                             <img 
+                              key={item.image_url}
                               src={item.image_url} 
                               alt={item.name}
                               className={`w-full h-full object-contain transition-all duration-300 ${
@@ -1485,6 +1486,7 @@ export default function Album() {
                             </div>
                           ) : (
                             <img 
+                              key={item.image_url}
                               src={item.image_url} 
                               alt={item.name}
                               className={`w-full h-full object-contain transition-all duration-300 ${
