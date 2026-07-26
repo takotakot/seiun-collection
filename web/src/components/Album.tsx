@@ -78,7 +78,7 @@ export default function Album() {
   const [errorMessage, setErrorMessage] = useState('');
   const [isDataLoaded, setIsDataLoaded] = useState(false);
   const [lastActiveAtCache, setLastActiveAtAtCache] = useState<number | null>(null);
-  const [colsMode, setColsMode] = useState<'responsive' | 'fixed6'>('responsive');
+  const [colsMode, setColsMode] = useState<'responsive' | 'fixed6'>('fixed6');
 
   // 画像プール管理用の状態
   const [imagePool, setImagePool] = useState<ImagePoolItem[]>([]);
@@ -627,7 +627,7 @@ export default function Album() {
   const activeSelectedItem = items.find(it => it.itemId === selectedItemId);
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 items-start">
+    <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 items-start">
       {/* 左カラム (1/4幅) : コントロール・詳細/攻略メモ・カテゴリタブ */}
       <div className="lg:col-span-1 space-y-6 order-2 lg:order-1 lg:sticky lg:top-24">
         {/* ログイン・ユーザーヘッダー */}
@@ -1196,7 +1196,7 @@ export default function Album() {
         </div>
 
         {/* アルバムメインフレーム */}
-        <div className="bg-album-paper border-[8px] border-[#3c3566] rounded-3xl p-5 sm:p-8 shadow-[0_15px_40px_rgba(0,0,0,0.5)] relative">
+        <div className="bg-album-paper border-[8px] border-[#3c3566] rounded-3xl p-4 shadow-[0_15px_40px_rgba(0,0,0,0.5)] relative">
           {/* 看板 */}
           <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 album-title-board px-10 py-2.5 text-base md:text-lg font-black tracking-widest z-20">
             アルバム
@@ -1213,16 +1213,16 @@ export default function Album() {
                 {/* 表示列数トグル */}
                 <div className="flex items-center gap-1 bg-[#ebdcb9] border border-[#c8c2aa] rounded-lg p-0.5 text-xs font-bold text-[#523621]">
                   <button 
-                    onClick={() => setColsMode('responsive')}
-                    className={`px-2 py-0.5 rounded transition-all cursor-pointer ${colsMode === 'responsive' ? 'bg-[#ffa248] text-[#633307] shadow-sm' : 'hover:bg-[#dfd9c1]/50'}`}
-                  >
-                    自動調整
-                  </button>
-                  <button 
                     onClick={() => setColsMode('fixed6')}
                     className={`px-2 py-0.5 rounded transition-all cursor-pointer ${colsMode === 'fixed6' ? 'bg-[#ffa248] text-[#633307] shadow-sm' : 'hover:bg-[#dfd9c1]/50'}`}
                   >
                     6列固定
+                  </button>
+                  <button 
+                    onClick={() => setColsMode('responsive')}
+                    className={`px-2 py-0.5 rounded transition-all cursor-pointer ${colsMode === 'responsive' ? 'bg-[#ffa248] text-[#633307] shadow-sm' : 'hover:bg-[#dfd9c1]/50'}`}
+                  >
+                    自動調整
                   </button>
                 </div>
 
@@ -1244,7 +1244,7 @@ export default function Album() {
               <div className={
                 colsMode === 'fixed6'
                   ? "grid grid-cols-6 gap-1.5"
-                  : "grid grid-cols-2 min-[450px]:grid-cols-3 md:grid-cols-4 gap-4"
+                  : "grid grid-cols-[repeat(auto-fill,minmax(130px,1fr))] gap-2.5"
               }>
                 {filteredItems.map((item) => {
                   const isOwned = !!ownedItemsMap[`${item.generation}_${item.itemId}`];
