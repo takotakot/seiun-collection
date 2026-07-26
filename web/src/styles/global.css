@@ -87,4 +87,41 @@ body {
   z-index: 5;
 }
 
+/* お守りカードの種類別背景スタイル（画像レイヤー ＋ 恒久CSSフォールバック） */
+.card-bg-base {
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.card-bg-normal {
+  background-color: #8CB771;
+  background-image: url('/images/cards/card_n.webp');
+}
+
+.card-bg-rare {
+  background-color: #92C8E6;
+  background-image: url('/images/cards/card_r.webp');
+}
+
+.card-bg-super_rare {
+  background-color: #FCBE68;
+  background-image: url('/images/cards/card_sr.webp');
+}
+
+.card-bg-ultra_rare {
+  background-color: #BAC9F3;
+  background-image: url('/images/cards/card_ur.webp'), linear-gradient(180deg, #C8B1FA 0%, #BCDBEF 100%);
+}
+
+.card-bg-ghost {
+  background-color: #ACAA9E;
+  background-image: url('/images/cards/card_ghost.webp');
+}
+
+.card-bg-question {
+  background-color: #ABA89D;
+  background-image: url('/images/cards/card_q.webp');
+}
+
 

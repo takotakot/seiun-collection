@@ -26,12 +26,32 @@ import { ref, uploadBytes, getDownloadURL, getMetadata } from 'firebase/storage'
 import { db, auth, storage } from '../lib/firebase';
 import plusIcon from '../assets/plus.webp';
 
+export type AmuletKind = 'normal' | 'rare' | 'super_rare' | 'ultra_rare' | 'ghost';
+
+export function getAmuletKindCardClass(kind?: AmuletKind): string {
+  switch (kind) {
+    case 'normal':
+      return 'card-bg-base card-bg-normal';
+    case 'rare':
+      return 'card-bg-base card-bg-rare';
+    case 'super_rare':
+      return 'card-bg-base card-bg-super_rare';
+    case 'ultra_rare':
+      return 'card-bg-base card-bg-ultra_rare';
+    case 'ghost':
+      return 'card-bg-base card-bg-ghost';
+    default:
+      return 'card-bg-base card-bg-question';
+  }
+}
+
 interface Item {
   id: string;
   itemId: string;
   generation: number;
   order: number;
   type: 'amulet' | 'stamp' | 'rune';
+  amulet_kind?: AmuletKind;
   name: string;
   effect_text: string;
   image_url: string;
@@ -1342,7 +1362,7 @@ export default function Album() {
                       <div 
                         key={item.id}
                         onClick={() => setSelectedItemId(item.itemId)}
-                        className={`relative flex flex-col rounded-xl overflow-hidden border transition-all duration-200 cursor-pointer ${
+                        className={`relative flex flex-col rounded-xl overflow-hidden border transition-all duration-200 cursor-pointer ${getAmuletKindCardClass(item.amulet_kind)} ${
                           isSelected 
                             ? 'border-[#ffa248] ring-4 ring-[#ffa248]/30 shadow-xl scale-[1.01]' 
                             : 'border-[#c8c2aa] hover:border-[#a8a28a] hover:shadow-md'
@@ -1363,15 +1383,11 @@ export default function Album() {
                           />
                         </div>
 
-                        {/* 画像エリア (所持時は緑グラデ、未所持時はベージュ) - 枠いっぱいに表示されるようパディングを調整 */}
+                        {/* 画像エリア - 親要素の種類別背景をそのまま見せる */}
                         <div 
                           className={`relative aspect-square w-full flex items-center justify-center ${
                             colsMode === 'fixed6' ? 'p-1.5' : 'p-2.5'
-                          } overflow-hidden transition-all ${
-                            isOwned 
-                              ? 'bg-gradient-to-b from-[#64a56c] to-[#47804f]' 
-                              : 'bg-[#d6d0b9]'
-                          }`}
+                          } overflow-hidden transition-all bg-transparent`}
                         >
                           {/* 通報済み警告ガードの表示 */}
                           {item.report_count && item.report_count >= 1 ? (
@@ -1424,13 +1440,13 @@ export default function Album() {
                           </span>
                         </div>
 
-                        {/* テキストエリア */}
-                        <div className={`p-2 flex-grow flex flex-col justify-between border-t ${
+                        {/* テキストエリア - 背景可読性を維持するための半透明オーバーレイ */}
+                        <div className={`p-2 flex-grow flex flex-col justify-between border-t backdrop-blur-[2px] ${
                           colsMode === 'fixed6' ? 'p-1.5' : 'p-3'
                         } ${
                           isOwned 
-                            ? 'border-[#346039]/30 bg-[#eff7f0]' 
-                            : 'border-[#b3ad97]/30 bg-[#dfd9c1]'
+                            ? 'border-[#346039]/30 bg-[#eff7f0]/85' 
+                            : 'border-[#b3ad97]/30 bg-[#dfd9c1]/80'
                         }`}>
                           <div className="space-y-1">
                             <div className={`font-bold text-left leading-tight truncate ${
