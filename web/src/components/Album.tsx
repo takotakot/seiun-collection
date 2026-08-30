@@ -115,6 +115,7 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
 
   // 詳細情報編集用の状態
   const [isEditingDetails, setIsEditingDetails] = useState(false);
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editEffectText, setEditEffectText] = useState('');
   const [editUpgradeFrom, setEditUpgradeFrom] = useState('');
@@ -124,13 +125,58 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
   const [detailSaveStatus, setDetailSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [detailErrorMessage, setDetailErrorMessage] = useState('');
 
+  // 編集開始処理
+  const handleStartEditDetails = (item: Item) => {
+    setEditingItemId(item.itemId);
+    setEditName(item.name || '');
+    setEditEffectText(item.effect_text || '');
+    setEditUpgradeFrom(item.upgrade_from || '');
+    setEditUpgradeTo(item.upgrade_to || '');
+    setEditRelatesFrom(item.relates_from || '');
+    setEditRelatesTo(item.relates_to || '');
+    setDetailSaveStatus('idle');
+    setDetailErrorMessage('');
+    setIsEditingDetails(true);
+  };
+
+  // 編集キャンセル処理
+  const handleCancelEditDetails = () => {
+    setIsEditingDetails(false);
+    setEditingItemId(null);
+    setDetailErrorMessage('');
+    setDetailSaveStatus('idle');
+  };
+
+  // アイテム選択処理（編集中は他アイテムへの切り替えをブロック）
+  const handleSelectItem = (itemId: string) => {
+    if (isEditingDetails) {
+      if (itemId === selectedItemId) return;
+      alert('お守りの編集中です。他のアイテムを選択する前に、編集を保存またはキャンセルしてください。');
+      return;
+    }
+    setSelectedItemId(itemId);
+  };
+
+  // カテゴリタブ切り替え処理（編集中はブロック）
+  const handleTabChange = (tab: 'amulet' | 'stamp' | 'rune') => {
+    if (isEditingDetails) {
+      if (tab === activeTab) return;
+      alert('お守りの編集中です。カテゴリを切り替える前に、編集を保存またはキャンセルしてください。');
+      return;
+    }
+    setActiveTab(tab);
+  };
+
   // 詳細情報の保存処理
   const handleSaveDetails = async () => {
     if (!user) {
       setDetailErrorMessage('情報の編集にはログインが必要です。');
       return;
     }
-    if (!activeSelectedItem) return;
+    if (!activeSelectedItem || !editingItemId || activeSelectedItem.itemId !== editingItemId) {
+      setDetailErrorMessage('編集対象のお守りが一致しません。');
+      return;
+    }
     if (!editName.trim()) {
       setDetailErrorMessage('名前を入力してください。');
       return;
@@ -156,6 +202,7 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
       setTimeout(() => {
         setDetailSaveStatus('idle');
         setIsEditingDetails(false);
+        setEditingItemId(null);
       }, 1000);
     } catch (err: any) {
       console.error('詳細情報の保存失敗:', err);
@@ -910,17 +957,7 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                       🖼️ 画像変更
                     </button>
                     <button
-                      onClick={() => {
-                        setEditName(activeSelectedItem.name || '');
-                        setEditEffectText(activeSelectedItem.effect_text || '');
-                        setEditUpgradeFrom(activeSelectedItem.upgrade_from || '');
-                        setEditUpgradeTo(activeSelectedItem.upgrade_to || '');
-                        setEditRelatesFrom(activeSelectedItem.relates_from || '');
-                        setEditRelatesTo(activeSelectedItem.relates_to || '');
-                        setDetailSaveStatus('idle');
-                        setDetailErrorMessage('');
-                        setIsEditingDetails(true);
-                      }}
+                      onClick={() => handleStartEditDetails(activeSelectedItem)}
                       className="px-2 py-1.5 bg-[#523621] hover:bg-[#6c482e] text-[#f5ebd7] font-bold rounded-lg text-[10px] shadow-sm transition-colors cursor-pointer border border-[#8a684b]/30"
                     >
                       📝 情報編集
@@ -953,9 +990,12 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
 
               {/* 情報編集モード時の入力項目 (お守り名、効果・説明文、各種リレーション) */}
               {isEditingDetails ? (
-                <div className="bg-[#ebe0c5] border border-[#d6ccb0] rounded-2xl p-4 space-y-3.5 shadow-inner text-xs">
-                  <div className="text-[11px] text-[#523621] font-black border-b border-[#8a684b]/30 pb-1.5 flex items-center gap-1">
-                    📝 お守り情報の編集
+                <div className="bg-[#ebe0c5] border-2 border-[#ffa248] rounded-2xl p-4 space-y-3.5 shadow-inner text-xs animate-in fade-in duration-200">
+                  <div className="text-[11px] text-[#523621] font-black border-b border-[#8a684b]/30 pb-1.5 flex items-center justify-between">
+                    <span className="flex items-center gap-1">📝 お守り情報の編集</span>
+                    <span className="text-[9px] text-[#b06c28] bg-[#ffa248]/20 px-1.5 py-0.5 rounded font-bold">
+                      他アイテムの選択不可
+                    </span>
                   </div>
                   
                   {/* お守り名入力 */}
@@ -1064,7 +1104,7 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                     )}
                     <button
                       type="button"
-                      onClick={() => setIsEditingDetails(false)}
+                      onClick={handleCancelEditDetails}
                       className="px-2.5 py-1.5 bg-[#2d2654]/10 hover:bg-[#2d2654]/20 text-[#523621] font-bold rounded-lg text-xs transition-colors cursor-pointer"
                     >
                       キャンセル
@@ -1100,8 +1140,13 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                           <span className="text-[#8a684b] font-bold">強化元:</span>
                           {fromItem ? (
                             <button 
-                              onClick={() => setSelectedItemId(fromItem.itemId)}
-                              className="text-[#b06c28] hover:underline font-black text-left"
+                              onClick={() => handleSelectItem(fromItem.itemId)}
+                              disabled={isEditingDetails}
+                              className={`font-black text-left ${
+                                isEditingDetails
+                                  ? 'text-[#8a684b]/50 cursor-not-allowed'
+                                  : 'text-[#b06c28] hover:underline cursor-pointer'
+                              }`}
                             >
                               {fromItem.name}
                             </button>
@@ -1115,8 +1160,13 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                           <span className="text-[#8a684b] font-bold">強化先:</span>
                           {toItem ? (
                             <button 
-                              onClick={() => setSelectedItemId(toItem.itemId)}
-                              className="text-[#b06c28] hover:underline font-black text-left"
+                              onClick={() => handleSelectItem(toItem.itemId)}
+                              disabled={isEditingDetails}
+                              className={`font-black text-left ${
+                                isEditingDetails
+                                  ? 'text-[#8a684b]/50 cursor-not-allowed'
+                                  : 'text-[#b06c28] hover:underline cursor-pointer'
+                              }`}
                             >
                               {toItem.name}
                             </button>
@@ -1143,8 +1193,13 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                           <span className="text-[#8a684b] font-bold">関連元:</span>
                           {fromItem ? (
                             <button 
-                              onClick={() => setSelectedItemId(fromItem.itemId)}
-                              className="text-[#8a684b] hover:underline font-black text-left"
+                              onClick={() => handleSelectItem(fromItem.itemId)}
+                              disabled={isEditingDetails}
+                              className={`font-black text-left ${
+                                isEditingDetails
+                                  ? 'text-[#8a684b]/50 cursor-not-allowed'
+                                  : 'text-[#8a684b] hover:underline cursor-pointer'
+                              }`}
                             >
                               {fromItem.name}
                             </button>
@@ -1158,8 +1213,13 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                           <span className="text-[#8a684b] font-bold">関連先:</span>
                           {toItem ? (
                             <button 
-                              onClick={() => setSelectedItemId(toItem.itemId)}
-                              className="text-[#8a684b] hover:underline font-black text-left"
+                              onClick={() => handleSelectItem(toItem.itemId)}
+                              disabled={isEditingDetails}
+                              className={`font-black text-left ${
+                                isEditingDetails
+                                  ? 'text-[#8a684b]/50 cursor-not-allowed'
+                                  : 'text-[#8a684b] hover:underline cursor-pointer'
+                              }`}
                             >
                               {toItem.name}
                             </button>
@@ -1190,8 +1250,13 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                           <div className="flex justify-between items-center pl-2 border-l-2 border-[#47804f]/30">
                             {targetItem ? (
                               <button 
-                                onClick={() => setSelectedItemId(targetItem.itemId)}
-                                className="text-[#47804f] hover:underline font-black text-left font-bold"
+                                onClick={() => handleSelectItem(targetItem.itemId)}
+                                disabled={isEditingDetails}
+                                className={`font-black text-left font-bold ${
+                                  isEditingDetails
+                                    ? 'text-[#8a684b]/50 cursor-not-allowed'
+                                    : 'text-[#47804f] hover:underline cursor-pointer'
+                                }`}
                               >
                                 ✨ {targetItem.name}
                               </button>
@@ -1212,8 +1277,15 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                                 <div key={src.itemId} className="flex items-center justify-between">
                                   {src.item ? (
                                     <button 
-                                      onClick={() => setSelectedItemId(src.itemId)}
-                                      className={`hover:underline font-bold text-left ${isSrcOwned ? 'text-[#346039]' : 'text-[#7c7764] line-through decoration-[#7c7764]/40 opacity-70'}`}
+                                      onClick={() => handleSelectItem(src.itemId)}
+                                      disabled={isEditingDetails}
+                                      className={`font-bold text-left ${
+                                        isEditingDetails
+                                          ? 'text-[#8a684b]/50 cursor-not-allowed'
+                                          : isSrcOwned 
+                                            ? 'text-[#346039] hover:underline cursor-pointer' 
+                                            : 'text-[#7c7764] line-through decoration-[#7c7764]/40 opacity-70 hover:underline cursor-pointer'
+                                      }`}
                                     >
                                       {idx + 1}. {src.item.name}
                                     </button>
@@ -1326,11 +1398,14 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
             return (
               <button
                 key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`w-full py-3.5 px-6 rounded-xl font-black text-sm transition-all cursor-pointer flex items-center justify-between shadow-md border ${
+                onClick={() => handleTabChange(tab)}
+                disabled={isEditingDetails}
+                className={`w-full py-3.5 px-6 rounded-xl font-black text-sm transition-all flex items-center justify-between shadow-md border ${
                   isActive 
-                    ? 'bg-gradient-to-b from-[#ffd98a] to-[#ffa248] border-[#633307] text-[#633307]' 
-                    : 'bg-[#3f396d] border-[#2d2654] text-[#a49ed5] hover:text-white hover:bg-[#4f4785]'
+                    ? 'bg-gradient-to-b from-[#ffd98a] to-[#ffa248] border-[#633307] text-[#633307] cursor-pointer' 
+                    : isEditingDetails
+                    ? 'bg-[#3f396d]/60 border-[#2d2654] text-[#a49ed5]/40 cursor-not-allowed opacity-60'
+                    : 'bg-[#3f396d] border-[#2d2654] text-[#a49ed5] hover:text-white hover:bg-[#4f4785] cursor-pointer'
                 }`}
               >
                 <span>{label}</span>
@@ -1371,11 +1446,14 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
             return (
               <button
                 key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`flex-1 py-3 text-center text-xs sm:text-sm font-black transition-all cursor-pointer flex items-center justify-center gap-1 ${
+                onClick={() => handleTabChange(tab)}
+                disabled={isEditingDetails}
+                className={`flex-1 py-3 text-center text-xs sm:text-sm font-black transition-all flex items-center justify-center gap-1 ${
                   isActive 
-                    ? 'tab-game-active-mobile' 
-                    : 'tab-game-inactive-mobile hover:text-white hover:bg-[#4f4785]'
+                    ? 'tab-game-active-mobile cursor-pointer' 
+                    : isEditingDetails
+                    ? 'tab-game-inactive-mobile opacity-40 cursor-not-allowed'
+                    : 'tab-game-inactive-mobile hover:text-white hover:bg-[#4f4785] cursor-pointer'
                 }`}
               >
                 {label}
@@ -1438,6 +1516,8 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                 {filteredItems.map((item) => {
                   const isOwned = !!ownedItemsMap[`${item.generation}_${item.itemId}`];
                   const isSelected = selectedItemId === item.itemId;
+                  const isEditingThisItem = isEditingDetails && isSelected;
+                  const isOtherItemDuringEdit = isEditingDetails && !isSelected;
                   const isAmulet = item.type === 'amulet';
                   const hasUpgrade = isAmulet && item.order % 2 === 0;
 
@@ -1446,13 +1526,26 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                     return (
                       <div 
                         key={item.id}
-                        onClick={() => setSelectedItemId(item.itemId)}
-                        className={`relative flex flex-col rounded-xl overflow-hidden border transition-all duration-200 cursor-pointer ${getAmuletKindCardClass(item.amulet_kind)} ${
-                          isSelected 
+                        onClick={() => handleSelectItem(item.itemId)}
+                        className={`relative flex flex-col rounded-xl overflow-hidden border transition-all duration-200 ${
+                          isOtherItemDuringEdit ? 'cursor-not-allowed' : 'cursor-pointer'
+                        } ${getAmuletKindCardClass(item.amulet_kind)} ${
+                          isEditingThisItem
+                            ? 'border-amber-500 ring-4 ring-amber-500/50 shadow-2xl scale-[1.02] z-10'
+                            : isOtherItemDuringEdit
+                            ? 'border-[#c8c2aa]/60 opacity-35 grayscale-[20%]'
+                            : isSelected 
                             ? 'border-[#ffa248] ring-4 ring-[#ffa248]/30 shadow-xl scale-[1.01]' 
                             : 'border-[#c8c2aa] hover:border-[#a8a28a] hover:shadow-md'
                         }`}
                       >
+                        {/* 編集中バッジ */}
+                        {isEditingThisItem && (
+                          <div className={`absolute z-30 ${colsMode === 'fixed6' ? 'top-1 right-1' : 'top-2 right-2'} bg-[#ffa248] text-[#633307] text-[8px] font-black px-1.5 py-0.5 rounded shadow-md border border-[#633307]/20 flex items-center gap-0.5`}>
+                            ✏️ 編集中
+                          </div>
+                        )}
+
                         {/* 所持チェックボックス (誤操作防止のため絶対配置) */}
                         <div 
                           className={`absolute z-30 ${colsMode === 'fixed6' ? 'top-1 left-1' : 'top-2 left-2'}`}
@@ -1555,11 +1648,17 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                     return (
                       <div 
                         key={item.id}
-                        onClick={() => setSelectedItemId(item.itemId)}
-                        className={`relative flex flex-col items-center justify-between rounded-2xl border transition-all duration-200 cursor-pointer ${
+                        onClick={() => handleSelectItem(item.itemId)}
+                        className={`relative flex flex-col items-center justify-between rounded-2xl border transition-all duration-200 ${
+                          isOtherItemDuringEdit ? 'cursor-not-allowed' : 'cursor-pointer'
+                        } ${
                           colsMode === 'fixed6' ? 'p-1' : 'p-3'
                         } ${
-                          isSelected 
+                          isEditingThisItem
+                            ? 'border-amber-500 bg-amber-500/10 ring-4 ring-amber-500/30 shadow-xl scale-[1.02] z-10'
+                            : isOtherItemDuringEdit
+                            ? 'border-transparent opacity-35'
+                            : isSelected 
                             ? 'border-[#ffa248] bg-[#ffa248]/5 ring-4 ring-[#ffa248]/20 shadow-lg scale-[1.01]' 
                             : 'border-transparent hover:bg-black/5'
                         }`}
