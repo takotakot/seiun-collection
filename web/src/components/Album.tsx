@@ -86,9 +86,14 @@ interface SharedComment {
   version: number;
 }
 
-export default function Album() {
+export interface AlbumProps {
+  initialItems?: Item[];
+  buildTimestamp?: number;
+}
+
+export default function Album({ initialItems = [], buildTimestamp }: AlbumProps) {
   const [user, setUser] = useState<User | null>(null);
-  const [items, setItems] = useState<Item[]>([]);
+  const [items, setItems] = useState<Item[]>(initialItems);
   const [ownedItemsMap, setOwnedItemsMap] = useState<Record<string, boolean>>({});
   const [activeTab, setActiveTab] = useState<'amulet' | 'stamp' | 'rune'>('amulet');
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
@@ -96,7 +101,7 @@ export default function Album() {
   const [commentText, setCommentText] = useState('');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
-  const [isDataLoaded, setIsDataLoaded] = useState(false);
+  const [isDataLoaded, setIsDataLoaded] = useState(initialItems.length > 0);
   const [lastActiveAtCache, setLastActiveAtAtCache] = useState<number | null>(null);
   const [colsMode, setColsMode] = useState<'responsive' | 'fixed6'>('fixed6');
 
@@ -141,7 +146,8 @@ export default function Album() {
         upgrade_from: editUpgradeFrom || '',
         upgrade_to: editUpgradeTo || '',
         relates_from: editRelatesFrom || '',
-        relates_to: editRelatesTo || ''
+        relates_to: editRelatesTo || '',
+        updated_at: serverTimestamp()
       };
 
       await updateDoc(itemRef, updateData);
@@ -177,26 +183,67 @@ export default function Album() {
     }
   };
 
-  // 2. マスターデータ及び画像プールデータの取得
-  // 第4世代のみを主軸として扱う（概要.mdに準拠）
+  // 2. マスターデータの取得（SSG差分フェッチ または フォールバック全件フェッチ）
   useEffect(() => {
-    // itemsコレクションのリアルタイム購読にして、通報や画像変更が即時反映されるようにする
-    const unsubscribeItems = onSnapshot(collection(db, 'items'), (snapshot) => {
-      const loadedItems: Item[] = [];
-      snapshot.forEach((doc) => {
-        const data = doc.data() as Item;
-        if (data.generation === 4) {
-          loadedItems.push(data);
-        }
-      });
-      loadedItems.sort((a, b) => a.order - b.order);
-      setItems(loadedItems);
-      setIsDataLoaded(true);
-    }, (err) => {
-      console.error('マスターデータリアルタイム購読エラー:', err);
-    });
+    let unsubscribeItems: () => void;
 
-    // image_poolコレクションのリアルタイム購読
+    if (buildTimestamp && buildTimestamp > 0 && initialItems.length > 0) {
+      // SSG でビルド済みデータが埋め込まれている場合: ビルド時刻以降に更新された差分のみを取得・監視
+      const diffQuery = query(
+        collection(db, 'items'),
+        where('updated_at', '>', Timestamp.fromMillis(buildTimestamp))
+      );
+
+      unsubscribeItems = onSnapshot(diffQuery, (snapshot) => {
+        if (!snapshot.empty) {
+          setItems((prevItems) => {
+            const itemMap = new Map(prevItems.map((it) => [it.id, it]));
+            snapshot.docChanges().forEach((change) => {
+              const data = change.doc.data() as Item;
+              if (data.generation === 4) {
+                if (change.type === 'removed') {
+                  itemMap.delete(change.doc.id);
+                } else {
+                  itemMap.set(change.doc.id, { ...data, id: change.doc.id });
+                }
+              }
+            });
+            const updatedList = Array.from(itemMap.values());
+            updatedList.sort((a, b) => a.order - b.order);
+            return updatedList;
+          });
+        }
+        setIsDataLoaded(true);
+      }, (err) => {
+        console.error('マスターデータ差分購読エラー:', err);
+      });
+    } else {
+      // フォールバック: 全件リアルタイム購読
+      unsubscribeItems = onSnapshot(collection(db, 'items'), (snapshot) => {
+        const loadedItems: Item[] = [];
+        snapshot.forEach((doc) => {
+          const data = doc.data() as Item;
+          if (data.generation === 4) {
+            loadedItems.push(data);
+          }
+        });
+        loadedItems.sort((a, b) => a.order - b.order);
+        setItems(loadedItems);
+        setIsDataLoaded(true);
+      }, (err) => {
+        console.error('マスターデータリアルタイム購読エラー:', err);
+      });
+    }
+
+    return () => {
+      if (unsubscribeItems) unsubscribeItems();
+    };
+  }, [buildTimestamp]);
+
+  // 2.5 画像プールデータはセレクター（モーダル）を開いたときのみ遅延取得
+  useEffect(() => {
+    if (!showPoolSelector) return;
+
     const unsubscribePool = onSnapshot(collection(db, 'image_pool'), (snapshot) => {
       const loadedPool: ImagePoolItem[] = [];
       snapshot.forEach((doc) => {
@@ -207,11 +254,8 @@ export default function Album() {
       console.error('画像プール購読エラー:', err);
     });
 
-    return () => {
-      unsubscribeItems();
-      unsubscribePool();
-    };
-  }, []);
+    return () => unsubscribePool();
+  }, [showPoolSelector]);
 
   // 3. ユーザー所持状況のリアルタイム監視
   useEffect(() => {
@@ -533,7 +577,8 @@ export default function Album() {
         transaction.update(itemRef, {
           image_url: poolItem.url,
           uploaded_by: user.uid,
-          uploaded_at: serverTimestamp()
+          uploaded_at: serverTimestamp(),
+          updated_at: serverTimestamp()
         });
 
         // プール側の状態も「紐付け済み、指定アイテムID」に同期
@@ -548,7 +593,8 @@ export default function Album() {
           transaction.update(relatedRef, {
             image_url: poolItem.url,
             uploaded_by: user.uid,
-            uploaded_at: serverTimestamp()
+            uploaded_at: serverTimestamp(),
+            updated_at: serverTimestamp()
           });
         }
       });
@@ -691,7 +737,8 @@ export default function Album() {
         transaction.update(itemRef, {
           image_url: downloadUrl,
           uploaded_by: user.uid,
-          uploaded_at: serverTimestamp()
+          uploaded_at: serverTimestamp(),
+          updated_at: serverTimestamp()
         });
 
         // image_pool に画像情報をプール登録 (is_linked=true, 指定アイテム紐付け)
@@ -709,7 +756,8 @@ export default function Album() {
           transaction.update(relatedRef, {
             image_url: downloadUrl,
             uploaded_by: user.uid,
-            uploaded_at: serverTimestamp()
+            uploaded_at: serverTimestamp(),
+            updated_at: serverTimestamp()
           });
         }
       });
@@ -850,7 +898,8 @@ export default function Album() {
                             const itemRef = doc(db, 'items', activeSelectedItem.id);
                             await updateDoc(itemRef, {
                               report_count: increment(1),
-                              reported_by: arrayUnion(user.uid)
+                              reported_by: arrayUnion(user.uid),
+                              updated_at: serverTimestamp()
                             });
                             alert('通報が終了しました。画像は直ちに非表示に設定されました。');
                           } catch (err) {
