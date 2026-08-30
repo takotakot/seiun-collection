@@ -88,10 +88,11 @@ interface SharedComment {
 
 export interface AlbumProps {
   initialItems?: Item[];
+  initialImagePool?: ImagePoolItem[];
   buildTimestamp?: number;
 }
 
-export default function Album({ initialItems = [], buildTimestamp }: AlbumProps) {
+export default function Album({ initialItems = [], initialImagePool = [], buildTimestamp }: AlbumProps) {
   const [user, setUser] = useState<User | null>(null);
   const [items, setItems] = useState<Item[]>(initialItems);
   const [ownedItemsMap, setOwnedItemsMap] = useState<Record<string, boolean>>({});
@@ -106,7 +107,7 @@ export default function Album({ initialItems = [], buildTimestamp }: AlbumProps)
   const [colsMode, setColsMode] = useState<'responsive' | 'fixed6'>('fixed6');
 
   // 画像プール管理用の状態
-  const [imagePool, setImagePool] = useState<ImagePoolItem[]>([]);
+  const [imagePool, setImagePool] = useState<ImagePoolItem[]>(initialImagePool);
   const [showPoolSelector, setShowPoolSelector] = useState(false);
   const [showAllPoolImages, setShowAllPoolImages] = useState(false);
   const [uploadStage, setUploadStage] = useState<'idle' | 'compressing' | 'uploading' | 'saving' | 'success' | 'error'>('idle');
@@ -240,22 +241,54 @@ export default function Album({ initialItems = [], buildTimestamp }: AlbumProps)
     };
   }, [buildTimestamp]);
 
-  // 2.5 画像プールデータはセレクター（モーダル）を開いたときのみ遅延取得
+  // 2.5 画像プールデータの取得（SSG差分フェッチ または フォールバック全件フェッチ）
   useEffect(() => {
     if (!showPoolSelector) return;
 
-    const unsubscribePool = onSnapshot(collection(db, 'image_pool'), (snapshot) => {
-      const loadedPool: ImagePoolItem[] = [];
-      snapshot.forEach((doc) => {
-        loadedPool.push(doc.data() as ImagePoolItem);
-      });
-      setImagePool(loadedPool);
-    }, (err) => {
-      console.error('画像プール購読エラー:', err);
-    });
+    let unsubscribePool: () => void;
 
-    return () => unsubscribePool();
-  }, [showPoolSelector]);
+    if (buildTimestamp && buildTimestamp > 0 && initialImagePool.length > 0) {
+      // ビルド時データがある場合: 差分のみを監視・マージ
+      const poolDiffQuery = query(
+        collection(db, 'image_pool'),
+        where('updated_at', '>', Timestamp.fromMillis(buildTimestamp))
+      );
+
+      unsubscribePool = onSnapshot(poolDiffQuery, (snapshot) => {
+        if (!snapshot.empty) {
+          setImagePool((prevPool) => {
+            const poolMap = new Map(prevPool.map((p) => [p.id, p]));
+            snapshot.docChanges().forEach((change) => {
+              const data = change.doc.data() as ImagePoolItem;
+              if (change.type === 'removed') {
+                poolMap.delete(change.doc.id);
+              } else {
+                poolMap.set(change.doc.id, { ...data, id: change.doc.id });
+              }
+            });
+            return Array.from(poolMap.values());
+          });
+        }
+      }, (err) => {
+        console.error('画像プール差分購読エラー:', err);
+      });
+    } else {
+      // フォールバック: 全件取得
+      unsubscribePool = onSnapshot(collection(db, 'image_pool'), (snapshot) => {
+        const loadedPool: ImagePoolItem[] = [];
+        snapshot.forEach((doc) => {
+          loadedPool.push(doc.data() as ImagePoolItem);
+        });
+        setImagePool(loadedPool);
+      }, (err) => {
+        console.error('画像プール購読エラー:', err);
+      });
+    }
+
+    return () => {
+      if (unsubscribePool) unsubscribePool();
+    };
+  }, [showPoolSelector, buildTimestamp]);
 
   // 3. ユーザー所持状況のリアルタイム監視
   useEffect(() => {
@@ -584,7 +617,8 @@ export default function Album({ initialItems = [], buildTimestamp }: AlbumProps)
         // プール側の状態も「紐付け済み、指定アイテムID」に同期
         transaction.update(poolItemRef, {
           is_linked: true,
-          target_item_id: currentItem.id
+          target_item_id: currentItem.id,
+          updated_at: serverTimestamp()
         });
 
         // 強化リレーション先のアイテムも同じ画像に更新
@@ -747,7 +781,9 @@ export default function Album({ initialItems = [], buildTimestamp }: AlbumProps)
           fileName: finalName,
           url: downloadUrl,
           is_linked: true,
-          target_item_id: currentItem.id
+          target_item_id: currentItem.id,
+          uploaded_at: serverTimestamp(),
+          updated_at: serverTimestamp()
         });
 
         // 強化リレーション先のアイテムも同じ画像に更新

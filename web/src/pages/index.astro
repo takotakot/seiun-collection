@@ -3,7 +3,7 @@ import Layout from '../layouts/Layout.astro';
 import Album from '../components/Album';
 import { getBuildItemsData } from '../lib/server/fetch-items';
 
-const { items, buildTimestamp } = await getBuildItemsData();
+const { items, imagePool, buildTimestamp } = await getBuildItemsData();
 ---
 
 <Layout title="進捗管理・図鑑">
@@ -27,6 +27,6 @@ const { items, buildTimestamp } = await getBuildItemsData();
     </div>
 
     {/* メインのアルバム表示 */}
-    <Album initialItems={items} buildTimestamp={buildTimestamp} client:load />
+    <Album initialItems={items} initialImagePool={imagePool} buildTimestamp={buildTimestamp} client:load />
   </div>
 </Layout>

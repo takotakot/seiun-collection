@@ -1,7 +1,7 @@
 import { getApps, initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { readFileSync, existsSync } from 'fs';
-import { join, resolve } from 'path';
+import { resolve } from 'path';
 
 export interface Item {
   id: string;
@@ -25,14 +25,25 @@ export interface Item {
   updated_at?: any;
 }
 
+export interface ImagePoolItem {
+  id: string;
+  fileName: string;
+  url: string;
+  is_linked: boolean;
+  target_item_id: string | null;
+  uploaded_at?: any;
+  updated_at?: any;
+}
+
 export interface BuildItemsResult {
   items: Item[];
+  imagePool: ImagePoolItem[];
   buildTimestamp: number;
   isFromDb: boolean;
 }
 
 /**
- * Astro ビルド時 (SSG) に Firestore からマスターデータを取得する
+ * Astro ビルド時 (SSG) に Firestore からマスターデータおよび画像プールデータを取得する
  */
 export async function getBuildItemsData(): Promise<BuildItemsResult> {
   const fetchDbOnBuild = process.env.FETCH_DB_ON_BUILD;
@@ -44,24 +55,23 @@ export async function getBuildItemsData(): Promise<BuildItemsResult> {
   const projectId = process.env.PUBLIC_FIREBASE_PROJECT_ID || 'seiun-collection-prd';
 
   try {
-    console.log(`📡 [Build] 本番 Firestore (${projectId}) からマスターデータを取得中...`);
+    console.log(`📡 [Build] 本番 Firestore (${projectId}) からマスターデータおよび画像プールを取得中...`);
 
     const app = getApps().length === 0
       ? initializeApp({ projectId })
       : getApps()[0];
 
     const db = getFirestore(app);
-    const snapshot = await db.collection('items').where('generation', '==', 4).get();
 
-    if (snapshot.empty) {
-      console.warn('⚠️ [Build] Firestore の items コレクションに第4世代データが存在しません。フォールバックします。');
-      return getFallbackData();
-    }
+    // items と image_pool を並行フェッチ
+    const [itemsSnapshot, poolSnapshot] = await Promise.all([
+      db.collection('items').where('generation', '==', 4).get(),
+      db.collection('image_pool').get()
+    ]);
 
     const items: Item[] = [];
-    snapshot.forEach((doc) => {
+    itemsSnapshot.forEach((doc) => {
       const data = doc.data();
-      // Firestore Timestamp 型などをプレーンなオブジェクト/数値に変換（JSONシリアライズ対応）
       const item: Item = {
         id: doc.id,
         itemId: data.itemId || '',
@@ -85,14 +95,28 @@ export async function getBuildItemsData(): Promise<BuildItemsResult> {
       };
       items.push(item);
     });
-
     items.sort((a, b) => a.order - b.order);
 
+    const imagePool: ImagePoolItem[] = [];
+    poolSnapshot.forEach((doc) => {
+      const data = doc.data();
+      imagePool.push({
+        id: doc.id,
+        fileName: data.fileName || '',
+        url: data.url || '',
+        is_linked: !!data.is_linked,
+        target_item_id: data.target_item_id || null,
+        uploaded_at: data.uploaded_at?.toMillis ? data.uploaded_at.toMillis() : null,
+        updated_at: data.updated_at?.toMillis ? data.updated_at.toMillis() : (data.uploaded_at?.toMillis ? data.uploaded_at.toMillis() : null)
+      });
+    });
+
     const buildTimestamp = Date.now();
-    console.log(`✅ [Build] Firestore から ${items.length} 件のアイテムデータを取得し、HTML に埋め込みました (BuildTimestamp: ${buildTimestamp})。`);
+    console.log(`✅ [Build] Firestore からアイテム ${items.length} 件、画像プール ${imagePool.length} 件を取得し、HTML に埋め込みました (BuildTimestamp: ${buildTimestamp})。`);
 
     return {
       items,
+      imagePool,
       buildTimestamp,
       isFromDb: true
     };
@@ -121,7 +145,8 @@ function getFallbackData(): BuildItemsResult {
         console.log(`📁 [Build] シードファイル (${seedPath}) から ${gen4Items.length} 件のアイテムを読み込みました。`);
         return {
           items: gen4Items,
-          buildTimestamp: 0, // 0にすることでクライアント側が差分ではなく最新取得をトリガー可能
+          imagePool: [],
+          buildTimestamp: 0,
           isFromDb: false
         };
       } catch (e) {
@@ -132,6 +157,7 @@ function getFallbackData(): BuildItemsResult {
 
   return {
     items: [],
+    imagePool: [],
     buildTimestamp: 0,
     isFromDb: false
   };
