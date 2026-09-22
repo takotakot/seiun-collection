@@ -24,7 +24,7 @@
     "vite": "^8.0.0"
   },
   "devDependencies": {
-    "firebase-admin": "^12.7.0",
+    "firebase-admin": "^14.4.0",
     "typescript": "^5.5.4"
   }
 }
