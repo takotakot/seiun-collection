@@ -1,0 +1,8 @@
+{
+  "generation": 4.5,
+  "expectedTotal": 326,
+  "ranges": [
+    { "from": 1, "to": 326, "amulet_kind": "normal" }
+  ],
+  "overrides": {}
+}
