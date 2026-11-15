@@ -1,5 +1,5 @@
 import { initializeApp, getApp } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
+import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -43,12 +43,17 @@ try {
 
   console.log(`${items.length} 件のマスタデータをインポート中...`);
 
-  const batch = db.batch();
+  // Firestore の1バッチ最大500件制限を回避するため、400件ごとにコミットを分割
+  const BATCH_LIMIT = 400;
+  let batch = db.batch();
+  let opCount = 0;
+  let totalCommitted = 0;
 
   for (const item of items) {
     // 初期値として、通報系のデフォルトフィールドを追加
     item.report_count = item.report_count || 0;
     item.reported_by = item.reported_by || [];
+    item.updated_at = FieldValue.serverTimestamp();
 
     // ローカル相対パス表記 （e.g. /images/fu_0018.png）の場合は、プール上にあるバケットURLへ自動アタッチ
     // ただし、Hostingから直接配信する /images/runes/ などの例外はスキップする
@@ -66,6 +71,14 @@ try {
           is_linked: true,
           target_item_id: item.id
         });
+        opCount++;
+        if (opCount >= BATCH_LIMIT) {
+          await batch.commit();
+          totalCommitted += opCount;
+          console.log(`バッチコミット実行 (${totalCommitted} 件のオペレーション完了)`);
+          batch = db.batch();
+          opCount = 0;
+        }
       } else {
         console.warn(`警告: 画像プールに ${imageId} が見つかりませんでした。空のままで登録されます。`);
         item.image_url = "";
@@ -74,10 +87,23 @@ try {
 
     const docRef = db.collection('items').doc(item.id);
     batch.set(docRef, item, { merge: true });
+    opCount++;
+    if (opCount >= BATCH_LIMIT) {
+      await batch.commit();
+      totalCommitted += opCount;
+      console.log(`バッチコミット実行 (${totalCommitted} 件のオペレーション完了)`);
+      batch = db.batch();
+      opCount = 0;
+    }
     console.log(`インポートキューに追加されました: ${item.id} (${item.name})`);
   }
 
-  await batch.commit();
+  if (opCount > 0) {
+    await batch.commit();
+    totalCommitted += opCount;
+    console.log(`最終バッチコミット実行 (${totalCommitted} 件の全オペレーション完了)`);
+  }
+
   console.log('すべてのマスタデータのインポートおよび画像自動アタッチが完了しました。');
 } catch (error) {
   console.error('インポートエラーが発生しました:', error);
