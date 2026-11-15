@@ -127,6 +127,8 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
   const [imagePool, setImagePool] = useState<ImagePoolItem[]>(initialImagePool);
   const [showPoolSelector, setShowPoolSelector] = useState(false);
   const [showAllPoolImages, setShowAllPoolImages] = useState(false);
+  const [poolSearchQuery, setPoolSearchQuery] = useState('');
+  const [copyGen4InfoOnAttach, setCopyGen4InfoOnAttach] = useState(true);
   const [uploadStage, setUploadStage] = useState<'idle' | 'compressing' | 'uploading' | 'saving' | 'success' | 'error'>('idle');
   const [updateRelatedImages, setUpdateRelatedImages] = useState(true);
 
@@ -169,6 +171,43 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
   }, [items, selectedDocId]);
 
   const activeSharedItemId = activeSelectedItem?.itemId || null;
+
+  // 現在選択されている世代ですでに使用されている画像URLの集合（世代別「割当済」動的判定用）
+  const usedImageUrlsInCurrentGen = useMemo(() => {
+    const urls = new Set<string>();
+    for (const it of currentGenItems) {
+      if (it.image_url) {
+        urls.add(it.image_url);
+      }
+    }
+    return urls;
+  }, [currentGenItems]);
+
+  // 第4世代アイテムの画像URL逆引きマップ（お守り名ラベル表示・検索・情報引き継ぎ用）
+  const gen4ItemsByImageUrl = useMemo(() => {
+    const map = new Map<string, Item[]>();
+    for (const it of items) {
+      if (it.generation === 4 && it.image_url) {
+        const list = map.get(it.image_url) || [];
+        list.push(it);
+        map.set(it.image_url, list);
+      }
+    }
+    for (const list of map.values()) {
+      list.sort((a, b) => a.order - b.order);
+    }
+    return map;
+  }, [items]);
+
+  // 画像プールモーダルを開く処理（初期モック枠の場合は第4世代情報引き継ぎをデフォルトON）
+  const handleOpenPoolSelector = () => {
+    if (activeSelectedItem) {
+      const isMockName = /^お守り #\d+$/.test(activeSelectedItem.name || '');
+      setCopyGen4InfoOnAttach(activeSelectedItem.generation === 4.5 && isMockName);
+    }
+    setPoolSearchQuery('');
+    setShowPoolSelector(true);
+  };
 
   // 編集開始処理
   const handleStartEditDetails = (item: Item) => {
@@ -708,7 +747,7 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
     };
   };
 
-  // 画像プールの特定画像をアイテムに紐付ける処理
+  // 画像プールの特定画像をアイテムに紐付ける処理（第4世代からの名前・効果テキスト同時引き継ぎ対応）
   const handleAttachImage = async (poolItem: ImagePoolItem) => {
     if (!user) {
       alert('画像の紐付けにはログインが必要です。');
@@ -721,18 +760,57 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
     try {
       // 強化リレーション先も更新する場合、対象アイテムを収集
       const relatedItems = updateRelatedImages ? getUpgradeChainItems(currentItem) : [];
+      const shouldCopyGen4 = currentItem.generation === 4.5 && copyGen4InfoOnAttach;
+      const gen4Matches = gen4ItemsByImageUrl.get(poolItem.url) || [];
+
+      const resolveGen4SourceForTarget = (target: Item): Item | null => {
+        if (!shouldCopyGen4 || gen4Matches.length === 0) return null;
+        const isTargetUpgraded = Boolean(target.upgrade_from) || (!target.upgrade_to && target.order % 2 === 0);
+
+        const directMatch = gen4Matches.find((m) => {
+          const isMatchUpgraded = Boolean(m.upgrade_from) || (!m.upgrade_to && m.order % 2 === 0);
+          return isMatchUpgraded === isTargetUpgraded;
+        });
+        if (directMatch) return directMatch;
+
+        const primary = gen4Matches[0];
+        const { fromItem, toItem } = getUpgradeRelations(primary);
+        if (isTargetUpgraded && toItem) return toItem;
+        if (!isTargetUpgraded && fromItem) return fromItem;
+
+        return target.id === currentItem.id ? primary : null;
+      };
+
+      const buildItemAttachPayload = (target: Item) => {
+        const payload: Record<string, any> = {
+          image_url: poolItem.url,
+          uploaded_by: user.uid,
+          uploaded_at: serverTimestamp(),
+          updated_at: serverTimestamp()
+        };
+        const gen4Src = resolveGen4SourceForTarget(target);
+        if (gen4Src) {
+          if (gen4Src.name && !/^お守り #\d+$/.test(gen4Src.name)) {
+            payload.name = gen4Src.name;
+          }
+          if (gen4Src.effect_text && !gen4Src.effect_text.includes('確認中・検証をお待ちください')) {
+            payload.effect_text = gen4Src.effect_text;
+          }
+        }
+        return { payload, copiedFromName: payload.name as string | undefined };
+      };
+
+      const copiedNames: string[] = [];
 
       await runTransaction(db, async (transaction) => {
         const itemRef = doc(db, 'items', currentItem.id);
         const poolItemRef = doc(db, 'image_pool', poolItem.id);
 
-        // トランザクション内でアイテムの画像、アップロードメタ情報を同期
-        transaction.update(itemRef, {
-          image_url: poolItem.url,
-          uploaded_by: user.uid,
-          uploaded_at: serverTimestamp(),
-          updated_at: serverTimestamp()
-        });
+        const mainUpdate = buildItemAttachPayload(currentItem);
+        if (mainUpdate.copiedFromName) copiedNames.push(mainUpdate.copiedFromName);
+
+        // トランザクション内でアイテムの画像・引き継ぎ情報・メタ情報を同期
+        transaction.update(itemRef, mainUpdate.payload);
 
         // プール側の状態も「紐付け済み、指定アイテムID」に同期
         transaction.update(poolItemRef, {
@@ -741,22 +819,22 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
           updated_at: serverTimestamp()
         });
 
-        // 強化リレーション先のアイテムも同じ画像に更新
+        // 強化リレーション先のアイテムも同じ画像（および対応する強化ペア情報）に更新
         for (const related of relatedItems) {
           const relatedRef = doc(db, 'items', related.id);
-          transaction.update(relatedRef, {
-            image_url: poolItem.url,
-            uploaded_by: user.uid,
-            uploaded_at: serverTimestamp(),
-            updated_at: serverTimestamp()
-          });
+          const relUpdate = buildItemAttachPayload(related);
+          if (relUpdate.copiedFromName) copiedNames.push(relUpdate.copiedFromName);
+          transaction.update(relatedRef, relUpdate.payload);
         }
       });
 
       const relatedMsg = relatedItems.length > 0
         ? `\n（強化リレーション先 ${relatedItems.length}件 も同時更新しました）`
         : '';
-      alert(`プールの画像をお守りにアタッチしました！${relatedMsg}`);
+      const copiedMsg = copiedNames.length > 0
+        ? `\n（第4世代から「${copiedNames.join(' / ')}」の名前・効果テキストを引き継ぎました）`
+        : '';
+      alert(`プールの画像をお守りにアタッチしました！${relatedMsg}${copiedMsg}`);
       setShowPoolSelector(false);
     } catch (err) {
       console.error('画像アタッチエラー:', err);
@@ -1031,7 +1109,7 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                 {user && !isEditingDetails && (
                   <div className="flex flex-col gap-1 items-end shrink-0">
                     <button
-                      onClick={() => setShowPoolSelector(true)}
+                      onClick={handleOpenPoolSelector}
                       className="px-2 py-1.5 bg-[#523621] hover:bg-[#6c482e] text-[#f5ebd7] font-bold rounded-lg text-[10px] shadow-sm transition-colors cursor-pointer border border-[#8a684b]/30"
                     >
                       🖼️ 画像変更
@@ -1913,6 +1991,27 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                 );
               })()}
 
+              {/* 第4世代のお守り名・効果テキスト同時引き継ぎオプション（第4.5世代編集時） */}
+              {activeSelectedItem.generation === 4.5 && (
+                <div className="bg-[#47804f]/10 border border-[#47804f]/30 rounded-2xl p-3 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="copyGen4InfoToggle"
+                      checked={copyGen4InfoOnAttach}
+                      onChange={(e) => setCopyGen4InfoOnAttach(e.target.checked)}
+                      className="accent-[#47804f] cursor-pointer w-4 h-4"
+                    />
+                    <label htmlFor="copyGen4InfoToggle" className="text-[11px] text-[#346039] font-extrabold cursor-pointer select-none">
+                      📝 第4世代のお守り名・効果テキストも一緒に引き継ぐ
+                    </label>
+                  </div>
+                  <div className="text-[9px] text-[#523621]/80 font-bold pl-6 leading-relaxed">
+                    プール画像に紐づく第4世代の同名お守り（強化先同時更新ON時はペア両方）から名前・効果文を自動コピーします。
+                  </div>
+                </div>
+              )}
+
               {/* アップロードフォーム */}
               <div className="bg-[#ebe0c5] border border-[#d6ccb0] rounded-2xl p-4 space-y-3">
                 <span className="text-[10px] text-[#8a684b] font-extrabold tracking-wide block">📤 ローカルよりお守り画像を直接アップロード (2MB以下)</span>
@@ -1944,11 +2043,11 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
               </div>
 
               {/* 画像エクスプローラー（画像プール） */}
-              <div className="space-y-4">
+              <div className="space-y-3">
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-[#8a684b]/10 pb-2">
                   <span className="text-[10px] text-[#8a684b] font-extrabold tracking-wide">📂 Storage 内に配備済みの画像プールから紐付け</span>
                   
-                  {/* is_linked 状態の切り替えトグル */}
+                  {/* 現在の世代での割当済み表示切り替えトグル */}
                   <div className="flex items-center gap-1.5 text-[10px] font-bold text-[#8a684b]">
                     <input
                       type="checkbox"
@@ -1958,43 +2057,98 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                       className="accent-[#ffa248] cursor-pointer"
                     />
                     <label htmlFor="showAllImagesToggle" className="cursor-pointer select-none">
-                      他ので使用中の紐付け済み画像も表示
+                      第{currentGeneration}世代で割当済みの画像も表示
                     </label>
                   </div>
+                </div>
+
+                {/* お守り名・ファイル名での検索フィルタ */}
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={poolSearchQuery}
+                    onChange={(e) => setPoolSearchQuery(e.target.value)}
+                    placeholder="🔍 第4世代のお守り名・効果キーワード・ファイル名で検索..."
+                    className="w-full bg-white/80 border border-[#d6ccb0] focus:border-[#ffa248] focus:ring-2 focus:ring-[#ffa248]/20 text-[#523621] placeholder-[#8a684b]/60 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none"
+                  />
+                  {poolSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setPoolSearchQuery('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#8a684b] hover:text-[#523621] text-xs font-black cursor-pointer"
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
 
                 {imagePool.length === 0 ? (
                   <div className="text-center py-10 text-[#8a684b] text-xs italic bg-black/5 rounded-xl font-bold">
                     プール（image_pool）に画像データはありません。
                   </div>
-                ) : (
-                  <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
-                    {imagePool
-                      .filter(img => showAllPoolImages ? true : !img.is_linked)
-                      .map((img) => (
-                        <button
-                          key={img.id}
-                          type="button"
-                          onClick={() => handleAttachImage(img)}
-                          className={`p-2 bg-white/40 border hover:border-[#ffa248]/80 hover:bg-[#fffcf7] rounded-xl flex flex-col justify-center items-center gap-1 transition-all group cursor-pointer ${
-                            img.is_linked ? 'opacity-60 border-[#c8c2aa] border-dashed' : 'border-[#c8c2aa]'
-                          }`}
-                        >
-                          <div className="w-12 h-12 flex items-center justify-center p-1 relative">
-                            <img src={img.url} alt={img.fileName} className="w-10 h-10 object-contain text-[8px]" />
-                            {img.is_linked && (
-                              <span className="absolute bottom-0 right-0 bg-gray-500/80 text-white font-extrabold text-[6px] px-1 rounded scale-90">
-                                割当済
+                ) : (() => {
+                  const normalizedQuery = poolSearchQuery.trim().toLowerCase();
+                  const visiblePoolItems = imagePool.filter((img) => {
+                    const isUsedInCurrentGen = usedImageUrlsInCurrentGen.has(img.url);
+                    if (!showAllPoolImages && isUsedInCurrentGen) return false;
+                    if (!normalizedQuery) return true;
+
+                    if (img.fileName.toLowerCase().includes(normalizedQuery)) return true;
+                    const gen4Refs = gen4ItemsByImageUrl.get(img.url) || [];
+                    return gen4Refs.some(
+                      (it) =>
+                        it.name.toLowerCase().includes(normalizedQuery) ||
+                        it.effect_text.toLowerCase().includes(normalizedQuery)
+                    );
+                  });
+
+                  if (visiblePoolItems.length === 0) {
+                    return (
+                      <div className="text-center py-8 text-[#8a684b] text-xs bg-black/5 rounded-xl font-bold">
+                        条件に一致する画像が見つかりません（割当済みを表示するか検索語を変更してください）。
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                      {visiblePoolItems.map((img) => {
+                        const isUsedInCurrentGen = usedImageUrlsInCurrentGen.has(img.url);
+                        const gen4Refs = gen4ItemsByImageUrl.get(img.url) || [];
+                        const gen4Base = gen4Refs.find((m) => !/^お守り #\d+$/.test(m.name)) || null;
+
+                        return (
+                          <button
+                            key={img.id}
+                            type="button"
+                            onClick={() => handleAttachImage(img)}
+                            title={gen4Base ? `${gen4Base.name} (${img.fileName})` : img.fileName}
+                            className={`p-2 bg-white/40 border hover:border-[#ffa248]/80 hover:bg-[#fffcf7] rounded-xl flex flex-col justify-center items-center gap-1 transition-all group cursor-pointer ${
+                              isUsedInCurrentGen ? 'opacity-60 border-[#c8c2aa] border-dashed' : 'border-[#c8c2aa]'
+                            }`}
+                          >
+                            <div className="w-12 h-12 flex items-center justify-center p-1 relative">
+                              <img src={img.url} alt={gen4Base?.name || img.fileName} className="w-10 h-10 object-contain text-[8px]" />
+                              {isUsedInCurrentGen && (
+                                <span className="absolute bottom-0 right-0 bg-gray-600/85 text-white font-extrabold text-[6px] px-1 rounded scale-90">
+                                  現世代済
+                                </span>
+                              )}
+                            </div>
+                            {gen4Base && (
+                              <span className="text-[8px] text-[#523621] truncate w-full text-center font-extrabold leading-tight">
+                                {gen4Base.name}
                               </span>
                             )}
-                          </div>
-                          <span className="text-[7px] text-[#8a684b] truncate w-full text-center font-bold">
-                            {img.fileName}
-                          </span>
-                        </button>
-                      ))}
-                  </div>
-                )}
+                            <span className="text-[7px] text-[#8a684b] truncate w-full text-center font-bold leading-tight">
+                              {img.fileName}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
             
