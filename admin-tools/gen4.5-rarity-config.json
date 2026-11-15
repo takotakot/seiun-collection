@@ -1,0 +1,12 @@
+{
+  "generation": 4.5,
+  "expectedTotal": 326,
+  "ranges": [
+    { "from": 1, "to": 94, "amulet_kind": "normal" },
+    { "from": 95, "to": 186, "amulet_kind": "rare" },
+    { "from": 187, "to": 280, "amulet_kind": "super_rare" },
+    { "from": 281, "to": 312, "amulet_kind": "ultra_rare" },
+    { "from": 313, "to": 326, "amulet_kind": "ghost" }
+  ],
+  "overrides": {}
+}
