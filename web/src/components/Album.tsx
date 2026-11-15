@@ -1448,12 +1448,13 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                           <span className="text-[#8a684b] font-bold block">合体に必要な素材お守り：</span>
                           <div className="grid grid-cols-1 gap-1 pl-2 border-l-2 border-[#47804f]/30">
                             {sources.map((src, idx) => {
-                              const isSrcOwned = src.item ? !!ownedItemsMap[`${src.item.generation}_${src.item.itemId}`] : false;
+                              const srcItem = src.item;
+                              const isSrcOwned = srcItem ? !!ownedItemsMap[`${srcItem.generation}_${srcItem.itemId}`] : false;
                               return (
                                 <div key={src.itemId} className="flex items-center justify-between">
-                                  {src.item ? (
+                                  {srcItem ? (
                                     <button 
-                                      onClick={() => handleSelectItem(src.item.id)}
+                                      onClick={() => handleSelectItem(srcItem.id)}
                                       disabled={isEditingDetails}
                                       className={`font-bold text-left ${
                                         isEditingDetails
@@ -1463,7 +1464,7 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                                             : 'text-[#7c7764] line-through decoration-[#7c7764]/40 opacity-70 hover:underline cursor-pointer'
                                       }`}
                                     >
-                                      {idx + 1}. {src.item.name}
+                                      {idx + 1}. {srcItem.name}
                                     </button>
                                   ) : (
                                     <span className="text-[#8a684b] font-mono text-[10px]">{src.itemId}</span>

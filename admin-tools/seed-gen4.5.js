@@ -1,11 +1,16 @@
-import { initializeApp, getApp, cert } from 'firebase-admin/app';
-import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { createRequire } from 'module';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const requireBase = existsSync(join(__dirname, '../web/node_modules/firebase-admin'))
+  ? new URL('../web/package.json', import.meta.url)
+  : import.meta.url;
+const require = createRequire(requireBase);
+const { initializeApp, getApp, cert } = require('firebase-admin/app');
+const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 
 async function main() {
   const args = process.argv.slice(2);
