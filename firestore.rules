@@ -7,7 +7,7 @@ service cloud.firestore {
       allow update: if request.auth != null 
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'image_url', 'report_count', 'reported_by', 
-          'name', 'effect_text', 'upgrade_from', 'upgrade_to', 
+          'name', 'effect_text', 'amulet_kind', 'upgrade_from', 'upgrade_to', 
           'relates_from', 'relates_to', 'uploaded_by', 'uploaded_at', 'updated_at'
         ]);
     }

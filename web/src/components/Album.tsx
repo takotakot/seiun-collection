@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   onAuthStateChanged,
   signInWithPopup,
@@ -26,7 +26,23 @@ import { ref, uploadBytes, getDownloadURL, getMetadata } from 'firebase/storage'
 import { db, auth, storage } from '../lib/firebase';
 import plusIcon from '../assets/plus.webp';
 
+export type Generation = 4 | 4.5;
+export const SUPPORTED_GENERATIONS: readonly Generation[] = [4.5, 4] as const;
+export const DEFAULT_GENERATION: Generation = 4.5;
+
+function isSupportedGeneration(gen: unknown): gen is Generation {
+  return gen === 4 || gen === 4.5;
+}
+
 export type AmuletKind = 'normal' | 'rare' | 'super_rare' | 'ultra_rare' | 'ghost';
+
+export const AMULET_KIND_LABELS: Record<AmuletKind, string> = {
+  normal: 'ノーマル (N)',
+  rare: 'レア (R)',
+  super_rare: 'スーパーレア (SR)',
+  ultra_rare: 'ウルトラレア (UR)',
+  ghost: 'お化け (Ghost)'
+};
 
 export function getAmuletKindCardClass(kind?: AmuletKind): string {
   switch (kind) {
@@ -48,7 +64,7 @@ export function getAmuletKindCardClass(kind?: AmuletKind): string {
 interface Item {
   id: string;
   itemId: string;
-  generation: number;
+  generation: Generation;
   order: number;
   type: 'amulet' | 'stamp' | 'rune';
   amulet_kind?: AmuletKind;
@@ -95,9 +111,10 @@ export interface AlbumProps {
 export default function Album({ initialItems = [], initialImagePool = [], buildTimestamp }: AlbumProps) {
   const [user, setUser] = useState<User | null>(null);
   const [items, setItems] = useState<Item[]>(initialItems);
+  const [currentGeneration, setCurrentGeneration] = useState<Generation>(DEFAULT_GENERATION);
   const [ownedItemsMap, setOwnedItemsMap] = useState<Record<string, boolean>>({});
   const [activeTab, setActiveTab] = useState<'amulet' | 'stamp' | 'rune'>('amulet');
-  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [activeComment, setActiveComment] = useState<SharedComment | null>(null);
   const [commentText, setCommentText] = useState('');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
@@ -110,14 +127,17 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
   const [imagePool, setImagePool] = useState<ImagePoolItem[]>(initialImagePool);
   const [showPoolSelector, setShowPoolSelector] = useState(false);
   const [showAllPoolImages, setShowAllPoolImages] = useState(false);
+  const [poolSearchQuery, setPoolSearchQuery] = useState('');
+  const [copyGen4InfoOnAttach, setCopyGen4InfoOnAttach] = useState(true);
   const [uploadStage, setUploadStage] = useState<'idle' | 'compressing' | 'uploading' | 'saving' | 'success' | 'error'>('idle');
   const [updateRelatedImages, setUpdateRelatedImages] = useState(true);
 
   // 詳細情報編集用の状態
   const [isEditingDetails, setIsEditingDetails] = useState(false);
-  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [editingDocId, setEditingDocId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editEffectText, setEditEffectText] = useState('');
+  const [editAmuletKind, setEditAmuletKind] = useState<AmuletKind | ''>('');
   const [editUpgradeFrom, setEditUpgradeFrom] = useState('');
   const [editUpgradeTo, setEditUpgradeTo] = useState('');
   const [editRelatesFrom, setEditRelatesFrom] = useState('');
@@ -125,11 +145,76 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
   const [detailSaveStatus, setDetailSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [detailErrorMessage, setDetailErrorMessage] = useState('');
 
+  // 初回マウント時: URLクエリパラメータ (?gen=4 / ?gen=4.5) があれば世代を同期（指定なしは既定 4.5）
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const genParam = params.get('gen');
+    if (genParam === '4') {
+      setCurrentGeneration(4);
+    } else if (genParam === '4.5') {
+      setCurrentGeneration(4.5);
+    }
+  }, []);
+
+  // 現在選択されている世代のアイテム一覧
+  const currentGenItems = useMemo(() => {
+    return items
+      .filter((it) => it.generation === currentGeneration)
+      .sort((a, b) => a.order - b.order);
+  }, [items, currentGeneration]);
+
+  // 現在選択されているアイテム（ドキュメントIDで一意に特定）
+  const activeSelectedItem = useMemo(() => {
+    if (!selectedDocId) return null;
+    return items.find((it) => it.id === selectedDocId) || null;
+  }, [items, selectedDocId]);
+
+  const activeSharedItemId = activeSelectedItem?.itemId || null;
+
+  // 現在選択されている世代ですでに使用されている画像URLの集合（世代別「割当済」動的判定用）
+  const usedImageUrlsInCurrentGen = useMemo(() => {
+    const urls = new Set<string>();
+    for (const it of currentGenItems) {
+      if (it.image_url) {
+        urls.add(it.image_url);
+      }
+    }
+    return urls;
+  }, [currentGenItems]);
+
+  // 第4世代アイテムの画像URL逆引きマップ（お守り名ラベル表示・検索・情報引き継ぎ用）
+  const gen4ItemsByImageUrl = useMemo(() => {
+    const map = new Map<string, Item[]>();
+    for (const it of items) {
+      if (it.generation === 4 && it.image_url) {
+        const list = map.get(it.image_url) || [];
+        list.push(it);
+        map.set(it.image_url, list);
+      }
+    }
+    for (const list of map.values()) {
+      list.sort((a, b) => a.order - b.order);
+    }
+    return map;
+  }, [items]);
+
+  // 画像プールモーダルを開く処理（初期モック枠の場合は第4世代情報引き継ぎをデフォルトON）
+  const handleOpenPoolSelector = () => {
+    if (activeSelectedItem) {
+      const isMockName = /^お守り #\d+$/.test(activeSelectedItem.name || '');
+      setCopyGen4InfoOnAttach(activeSelectedItem.generation === 4.5 && isMockName);
+    }
+    setPoolSearchQuery('');
+    setShowPoolSelector(true);
+  };
+
   // 編集開始処理
   const handleStartEditDetails = (item: Item) => {
-    setEditingItemId(item.itemId);
+    setEditingDocId(item.id);
     setEditName(item.name || '');
     setEditEffectText(item.effect_text || '');
+    setEditAmuletKind(item.amulet_kind || '');
     setEditUpgradeFrom(item.upgrade_from || '');
     setEditUpgradeTo(item.upgrade_to || '');
     setEditRelatesFrom(item.relates_from || '');
@@ -142,19 +227,19 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
   // 編集キャンセル処理
   const handleCancelEditDetails = () => {
     setIsEditingDetails(false);
-    setEditingItemId(null);
+    setEditingDocId(null);
     setDetailErrorMessage('');
     setDetailSaveStatus('idle');
   };
 
-  // アイテム選択処理（編集中は他アイテムへの切り替えをブロック）
-  const handleSelectItem = (itemId: string) => {
+  // アイテム選択処理（ドキュメントIDベース・編集中は他アイテムへの切り替えをブロック）
+  const handleSelectItem = (docId: string) => {
     if (isEditingDetails) {
-      if (itemId === selectedItemId) return;
+      if (docId === selectedDocId) return;
       alert('お守りの編集中です。他のアイテムを選択する前に、編集を保存またはキャンセルしてください。');
       return;
     }
-    setSelectedItemId(itemId);
+    setSelectedDocId(docId);
   };
 
   // カテゴリタブ切り替え処理（編集中はブロック）
@@ -167,13 +252,35 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
     setActiveTab(tab);
   };
 
+  // 世代切り替え処理（編集中はブロック、URLクエリを同期）
+  const handleGenerationChange = (gen: Generation) => {
+    if (gen === currentGeneration) return;
+    if (isEditingDetails) {
+      alert('お守りの編集中です。世代を切り替える前に、編集を保存またはキャンセルしてください。');
+      return;
+    }
+    setCurrentGeneration(gen);
+    setSelectedDocId(null);
+    setShowPoolSelector(false);
+
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      if (gen === DEFAULT_GENERATION) {
+        url.searchParams.delete('gen');
+      } else {
+        url.searchParams.set('gen', String(gen));
+      }
+      window.history.replaceState({}, '', url.toString());
+    }
+  };
+
   // 詳細情報の保存処理
   const handleSaveDetails = async () => {
     if (!user) {
       setDetailErrorMessage('情報の編集にはログインが必要です。');
       return;
     }
-    if (!activeSelectedItem || !editingItemId || activeSelectedItem.itemId !== editingItemId) {
+    if (!activeSelectedItem || !editingDocId || activeSelectedItem.id !== editingDocId) {
       setDetailErrorMessage('編集対象のお守りが一致しません。');
       return;
     }
@@ -197,12 +304,16 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
         updated_at: serverTimestamp()
       };
 
+      if (activeSelectedItem.type === 'amulet' && editAmuletKind) {
+        updateData.amulet_kind = editAmuletKind;
+      }
+
       await updateDoc(itemRef, updateData);
       setDetailSaveStatus('success');
       setTimeout(() => {
         setDetailSaveStatus('idle');
         setIsEditingDetails(false);
-        setEditingItemId(null);
+        setEditingDocId(null);
       }, 1000);
     } catch (err: any) {
       console.error('詳細情報の保存失敗:', err);
@@ -248,7 +359,7 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
             const itemMap = new Map(prevItems.map((it) => [it.id, it]));
             snapshot.docChanges().forEach((change) => {
               const data = change.doc.data() as Item;
-              if (data.generation === 4) {
+              if (isSupportedGeneration(data.generation)) {
                 if (change.type === 'removed') {
                   itemMap.delete(change.doc.id);
                 } else {
@@ -257,7 +368,7 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
               }
             });
             const updatedList = Array.from(itemMap.values());
-            updatedList.sort((a, b) => a.order - b.order);
+            updatedList.sort((a, b) => a.generation - b.generation || a.order - b.order);
             return updatedList;
           });
         }
@@ -271,11 +382,11 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
         const loadedItems: Item[] = [];
         snapshot.forEach((doc) => {
           const data = doc.data() as Item;
-          if (data.generation === 4) {
-            loadedItems.push(data);
+          if (isSupportedGeneration(data.generation)) {
+            loadedItems.push({ ...data, id: doc.id });
           }
         });
-        loadedItems.sort((a, b) => a.order - b.order);
+        loadedItems.sort((a, b) => a.generation - b.generation || a.order - b.order);
         setItems(loadedItems);
         setIsDataLoaded(true);
       }, (err) => {
@@ -435,15 +546,15 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
     }
   };
 
-  // 5. 選択したアイテムの共有攻略メモのリアルタイム監視
+  // 5. 選択したアイテムの共有攻略メモのリアルタイム監視（itemId 単位で共有）
   useEffect(() => {
-    if (!selectedItemId) {
+    if (!activeSharedItemId) {
       setActiveComment(null);
       setCommentText('');
       return;
     }
 
-    const commentDocRef = doc(db, 'comments', selectedItemId);
+    const commentDocRef = doc(db, 'comments', activeSharedItemId);
     const unsubscribe = onSnapshot(commentDocRef, (snap) => {
       if (snap.exists()) {
         const data = snap.data() as SharedComment;
@@ -464,7 +575,7 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
     });
 
     return () => unsubscribe();
-  }, [selectedItemId]);
+  }, [activeSharedItemId]);
 
   // 6. 楽観的排他ロックを考慮したトランザクションによるWikiメモ更新
   const handleSaveComment = async () => {
@@ -472,12 +583,12 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
       alert('攻略メモの編集にはログインが必要です。');
       return;
     }
-    if (!selectedItemId) return;
+    if (!activeSharedItemId) return;
 
     setSaveStatus('saving');
     setErrorMessage('');
 
-    const commentDocRef = doc(db, 'comments', selectedItemId);
+    const commentDocRef = doc(db, 'comments', activeSharedItemId);
 
     try {
       await runTransaction(db, async (transaction) => {
@@ -519,22 +630,22 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
     }
   };
 
-  // 7. 進捗率の計算
-  const filteredItems = items.filter(item => item.type === activeTab);
+  // 7. 進捗率の計算（現在選択されている世代のみを対象）
+  const filteredItems = currentGenItems.filter(item => item.type === activeTab);
   const totalInTab = filteredItems.length;
   const ownedInTab = filteredItems.filter(item => !!ownedItemsMap[`${item.generation}_${item.itemId}`]).length;
   const percentageInTab = totalInTab > 0 ? Math.round((ownedInTab / totalInTab) * 100) : 0;
 
-  const totalAll = items.length;
-  const ownedAll = items.filter(item => !!ownedItemsMap[`${item.generation}_${item.itemId}`]).length;
+  const totalAll = currentGenItems.length;
+  const ownedAll = currentGenItems.filter(item => !!ownedItemsMap[`${item.generation}_${item.itemId}`]).length;
   const percentageAll = totalAll > 0 ? Math.round((ownedAll / totalAll) * 100) : 0;
 
-  // 強化リレーションに基づくアイテムの解決
-  const findItemByItemId = (itId: string) => {
-    return items.find(it => it.itemId === itId);
+  // 同一世代内での itemId に基づくアイテム解決
+  const findItemByItemId = (itId: string, gen: Generation = currentGeneration) => {
+    return items.find(it => it.generation === gen && it.itemId === itId);
   };
 
-  // お守りの強化リレーション（動的フォールバック・4->1や特殊進化の考慮）の解決
+  // お守りの強化リレーション（動的フォールバック・4->1や特殊進化の考慮）の解決（同一世代スコープ限定）
   const getUpgradeRelations = (item: Item) => {
     if (item.type !== 'amulet') return { fromItem: null, toItem: null, fromId: undefined, toId: undefined };
 
@@ -542,35 +653,35 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
     let fromItemId = item.upgrade_from;
     let toItemId = item.upgrade_to;
 
-    // 2. DBに定義されていない場合、デフォルトの奇数・偶数のペアでフォールバック
+    // 2. DBに定義されていない場合、同一世代内の奇数・偶数のペアでフォールバック
     if (!fromItemId && !toItemId && !item.relates_from && !item.relates_to) {
       if (item.order % 2 === 0) {
-        const prevItem = items.find(it => it.type === 'amulet' && it.order === item.order - 1);
+        const prevItem = items.find(it => it.generation === item.generation && it.type === 'amulet' && it.order === item.order - 1);
         if (prevItem) {
           fromItemId = prevItem.itemId;
         }
       } else {
-        const nextItem = items.find(it => it.type === 'amulet' && it.order === item.order + 1);
+        const nextItem = items.find(it => it.generation === item.generation && it.type === 'amulet' && it.order === item.order + 1);
         if (nextItem) {
           toItemId = nextItem.itemId;
         }
       }
     }
 
-    const fromItem = fromItemId ? findItemByItemId(fromItemId) : null;
-    const toItem = toItemId ? findItemByItemId(toItemId) : null;
+    const fromItem = fromItemId ? findItemByItemId(fromItemId, item.generation) : null;
+    const toItem = toItemId ? findItemByItemId(toItemId, item.generation) : null;
 
     return { fromItem, toItem, fromId: fromItemId, toId: toItemId };
   };
 
-  // 強化リレーションチェーンを辿って、接続されたすべてのアイテムを収集する
+  // 強化リレーションチェーンを辿って、同一世代内で接続されたすべてのアイテムを収集する
   const getUpgradeChainItems = (startItem: Item): Item[] => {
     const visited = new Set<string>();
     const chain: Item[] = [];
 
     const traverse = (item: Item) => {
-      if (visited.has(item.itemId)) return;
-      visited.add(item.itemId);
+      if (visited.has(item.id)) return;
+      visited.add(item.id);
       chain.push(item);
 
       const { fromItem, toItem } = getUpgradeRelations(item);
@@ -580,35 +691,37 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
 
     traverse(startItem);
     // 自分自身を除外して返す
-    return chain.filter(it => it.itemId !== startItem.itemId);
+    return chain.filter(it => it.id !== startItem.id);
   };
 
-  // 特殊な関連（relates_from / relates_to）の解決
+  // 特殊な関連（relates_from / relates_to）の解決（同一世代スコープ限定）
   const getSpecialRelations = (item: Item) => {
     const fromId = item.relates_from;
     const toId = item.relates_to;
-    const fromItem = fromId ? findItemByItemId(fromId) : null;
-    const toItem = toId ? findItemByItemId(toId) : null;
+    const fromItem = fromId ? findItemByItemId(fromId, item.generation) : null;
+    const toItem = toId ? findItemByItemId(toId, item.generation) : null;
     return { fromItem, toItem, fromId, toId };
   };
 
-  // 4合体進化（レシピ）の解決
+  // 4合体進化（レシピ）の解決（同一世代スコープ限定）
   const getRecipeRelations = (item: Item) => {
+    const sameGenItems = items.filter(it => it.generation === item.generation);
+
     // 自身が進化後の場合 (recipe_sources を持っている)
     const sources = item.recipe_sources ? item.recipe_sources.map(id => ({
       itemId: id,
-      item: findItemByItemId(id)
+      item: findItemByItemId(id, item.generation)
     })) : [];
 
     // 自身が合体素材の場合 (recipe_target を持っている)
     const targetId = item.recipe_target;
-    const targetItem = targetId ? findItemByItemId(targetId) : null;
+    const targetItem = targetId ? findItemByItemId(targetId, item.generation) : null;
 
     // 逆引き: 相手がrecipe_sourcesを持っているのに自分がrecipe_targetに指定されていない場合、自動ターゲット解決
     let autoTargetItem = targetItem;
     let autoTargetId = targetId;
     if (!autoTargetItem) {
-      const match = items.find(it => it.recipe_sources && it.recipe_sources.includes(item.itemId));
+      const match = sameGenItems.find(it => it.recipe_sources && it.recipe_sources.includes(item.itemId));
       if (match) {
         autoTargetItem = match;
         autoTargetId = match.itemId;
@@ -618,7 +731,7 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
     // 逆引き: 自身が進化後の場合に、素材側が自分をtargetに指定しているお守りを自動収集
     let autoSources = [...sources];
     if (autoSources.length === 0) {
-      const matches = items.filter(it => it.recipe_target === item.itemId);
+      const matches = sameGenItems.filter(it => it.recipe_target === item.itemId);
       if (matches.length > 0) {
         autoSources = matches.map(it => ({
           itemId: it.itemId,
@@ -634,32 +747,70 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
     };
   };
 
-  // 画像プールの特定画像をアイテムに紐付ける処理
+  // 画像プールの特定画像をアイテムに紐付ける処理（第4世代からの名前・効果テキスト同時引き継ぎ対応）
   const handleAttachImage = async (poolItem: ImagePoolItem) => {
     if (!user) {
       alert('画像の紐付けにはログインが必要です。');
       return;
     }
-    if (!selectedItemId) return;
+    if (!activeSelectedItem) return;
 
-    const currentItem = items.find(it => it.itemId === selectedItemId);
-    if (!currentItem) return;
+    const currentItem = activeSelectedItem;
 
     try {
       // 強化リレーション先も更新する場合、対象アイテムを収集
       const relatedItems = updateRelatedImages ? getUpgradeChainItems(currentItem) : [];
+      const shouldCopyGen4 = currentItem.generation === 4.5 && copyGen4InfoOnAttach;
+      const gen4Matches = gen4ItemsByImageUrl.get(poolItem.url) || [];
+
+      const resolveGen4SourceForTarget = (target: Item): Item | null => {
+        if (!shouldCopyGen4 || gen4Matches.length === 0) return null;
+        const isTargetUpgraded = Boolean(target.upgrade_from) || (!target.upgrade_to && target.order % 2 === 0);
+
+        const directMatch = gen4Matches.find((m) => {
+          const isMatchUpgraded = Boolean(m.upgrade_from) || (!m.upgrade_to && m.order % 2 === 0);
+          return isMatchUpgraded === isTargetUpgraded;
+        });
+        if (directMatch) return directMatch;
+
+        const primary = gen4Matches[0];
+        const { fromItem, toItem } = getUpgradeRelations(primary);
+        if (isTargetUpgraded && toItem) return toItem;
+        if (!isTargetUpgraded && fromItem) return fromItem;
+
+        return target.id === currentItem.id ? primary : null;
+      };
+
+      const buildItemAttachPayload = (target: Item) => {
+        const payload: Record<string, any> = {
+          image_url: poolItem.url,
+          uploaded_by: user.uid,
+          uploaded_at: serverTimestamp(),
+          updated_at: serverTimestamp()
+        };
+        const gen4Src = resolveGen4SourceForTarget(target);
+        if (gen4Src) {
+          if (gen4Src.name && !/^お守り #\d+$/.test(gen4Src.name)) {
+            payload.name = gen4Src.name;
+          }
+          if (gen4Src.effect_text && !gen4Src.effect_text.includes('確認中・検証をお待ちください')) {
+            payload.effect_text = gen4Src.effect_text;
+          }
+        }
+        return { payload, copiedFromName: payload.name as string | undefined };
+      };
+
+      const copiedNames: string[] = [];
 
       await runTransaction(db, async (transaction) => {
         const itemRef = doc(db, 'items', currentItem.id);
         const poolItemRef = doc(db, 'image_pool', poolItem.id);
 
-        // トランザクション内でアイテムの画像、アップロードメタ情報を同期
-        transaction.update(itemRef, {
-          image_url: poolItem.url,
-          uploaded_by: user.uid,
-          uploaded_at: serverTimestamp(),
-          updated_at: serverTimestamp()
-        });
+        const mainUpdate = buildItemAttachPayload(currentItem);
+        if (mainUpdate.copiedFromName) copiedNames.push(mainUpdate.copiedFromName);
+
+        // トランザクション内でアイテムの画像・引き継ぎ情報・メタ情報を同期
+        transaction.update(itemRef, mainUpdate.payload);
 
         // プール側の状態も「紐付け済み、指定アイテムID」に同期
         transaction.update(poolItemRef, {
@@ -668,22 +819,22 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
           updated_at: serverTimestamp()
         });
 
-        // 強化リレーション先のアイテムも同じ画像に更新
+        // 強化リレーション先のアイテムも同じ画像（および対応する強化ペア情報）に更新
         for (const related of relatedItems) {
           const relatedRef = doc(db, 'items', related.id);
-          transaction.update(relatedRef, {
-            image_url: poolItem.url,
-            uploaded_by: user.uid,
-            uploaded_at: serverTimestamp(),
-            updated_at: serverTimestamp()
-          });
+          const relUpdate = buildItemAttachPayload(related);
+          if (relUpdate.copiedFromName) copiedNames.push(relUpdate.copiedFromName);
+          transaction.update(relatedRef, relUpdate.payload);
         }
       });
 
       const relatedMsg = relatedItems.length > 0
         ? `\n（強化リレーション先 ${relatedItems.length}件 も同時更新しました）`
         : '';
-      alert(`プールの画像をお守りにアタッチしました！${relatedMsg}`);
+      const copiedMsg = copiedNames.length > 0
+        ? `\n（第4世代から「${copiedNames.join(' / ')}」の名前・効果テキストを引き継ぎました）`
+        : '';
+      alert(`プールの画像をお守りにアタッチしました！${relatedMsg}${copiedMsg}`);
       setShowPoolSelector(false);
     } catch (err) {
       console.error('画像アタッチエラー:', err);
@@ -697,10 +848,9 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
       alert('アップロードにはログインが必要です。');
       return;
     }
-    if (!selectedItemId) return;
+    if (!activeSelectedItem) return;
 
-    const currentItem = items.find(it => it.itemId === selectedItemId);
-    if (!currentItem) return;
+    const currentItem = activeSelectedItem;
 
     const file = e.target.files?.[0];
     if (!file) return;
@@ -859,8 +1009,6 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
     }
   };
 
-  const activeSelectedItem = items.find(it => it.itemId === selectedItemId);
-
   return (
     <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 items-start">
       {/* 左カラム (1/4幅) : コントロール・詳細/攻略メモ・カテゴリタブ */}
@@ -913,7 +1061,7 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
           {/* 装飾用の端の角丸木枠 */}
           <div className="absolute inset-2 border border-[#8a684b]/30 rounded-2xl pointer-events-none" />
 
-          {!selectedItemId ? (
+          {!selectedDocId ? (
             <div className="text-center py-12 text-[#7c7764] space-y-3 z-10 relative">
               <span className="text-4xl block animate-bounce">🔍</span>
               <p className="text-xs font-bold leading-relaxed">アイテムをクリックして、詳細表示や攻略メモを書き込みましょう！</p>
@@ -928,7 +1076,7 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
               <div className="flex items-center gap-4 border-b border-[#8a684b]/40 pb-4">
                 <div className={`w-14 h-14 rounded-xl flex items-center justify-center p-2 border relative shadow-inner ${
                   activeSelectedItem.type === 'amulet' 
-                    ? 'bg-gradient-to-b from-[#64a56c] to-[#47804f] border-[#346039]' 
+                    ? `${getAmuletKindCardClass(activeSelectedItem.amulet_kind)} border-[#8a684b]/40` 
                     : 'bg-black/5 border-[#8a684b]/20'
                 }`}>
                   {/* 通報状態の場合は警告プレースホルダー、通常状態は画像表示 */}
@@ -942,16 +1090,26 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                   )}
                 </div>
                 <div className="space-y-1 min-w-0 flex-grow">
-                  <span className="text-[9px] tracking-wider font-extrabold px-1.5 py-0.5 rounded bg-[#ffa248] text-[#633307] border border-[#633307]/20">
-                    {activeSelectedItem.type === 'amulet' ? 'お守り' : activeSelectedItem.type === 'stamp' ? 'スタンプ' : 'ルーン石'}
-                  </span>
+                  <div className="flex flex-wrap items-center gap-1">
+                    <span className="text-[9px] tracking-wider font-extrabold px-1.5 py-0.5 rounded bg-[#ffa248] text-[#633307] border border-[#633307]/20">
+                      {activeSelectedItem.type === 'amulet' ? 'お守り' : activeSelectedItem.type === 'stamp' ? 'スタンプ' : 'ルーン石'}
+                    </span>
+                    {activeSelectedItem.type === 'amulet' && activeSelectedItem.amulet_kind && (
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[#ebe0c5] text-[#523621] border border-[#8a684b]/30">
+                        {AMULET_KIND_LABELS[activeSelectedItem.amulet_kind]}
+                      </span>
+                    )}
+                    <span className="text-[9px] font-mono font-bold text-[#8a684b]">
+                      #{activeSelectedItem.order}
+                    </span>
+                  </div>
                   <h2 className="font-black text-sm sm:text-base text-[#523621] truncate leading-snug">{activeSelectedItem.name}</h2>
                 </div>
                 {/* ログインユーザー向け: 画像プールアタッチ / アップロードボタン */}
                 {user && !isEditingDetails && (
                   <div className="flex flex-col gap-1 items-end shrink-0">
                     <button
-                      onClick={() => setShowPoolSelector(true)}
+                      onClick={handleOpenPoolSelector}
                       className="px-2 py-1.5 bg-[#523621] hover:bg-[#6c482e] text-[#f5ebd7] font-bold rounded-lg text-[10px] shadow-sm transition-colors cursor-pointer border border-[#8a684b]/30"
                     >
                       🖼️ 画像変更
@@ -1010,6 +1168,24 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                     />
                   </div>
 
+                  {/* お守り種類（レアリティ）選択 */}
+                  {activeSelectedItem.type === 'amulet' && (
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-[#8a684b] font-extrabold block">お守りの種類（レアリティ）</label>
+                      <select
+                        value={editAmuletKind}
+                        onChange={(e) => setEditAmuletKind(e.target.value as AmuletKind | '')}
+                        className="w-full bg-[#f5ebd7] border border-[#d6ccb0] hover:border-[#bdae8c] text-[#523621] rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-[#ffa248]/20 font-bold cursor-pointer"
+                      >
+                        <option value="normal">ノーマル (N)</option>
+                        <option value="rare">レア (R)</option>
+                        <option value="super_rare">スーパーレア (SR)</option>
+                        <option value="ultra_rare">ウルトラレア (UR)</option>
+                        <option value="ghost">お化け (Ghost)</option>
+                      </select>
+                    </div>
+                  )}
+
                   {/* 効果・説明文入力 */}
                   <div className="space-y-1">
                     <label className="text-[10px] text-[#8a684b] font-extrabold block">効果・説明文</label>
@@ -1034,9 +1210,9 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                           className="w-full bg-[#f5ebd7] border border-[#d6ccb0] text-[#523621] rounded-md px-1.5 py-1.5 text-[11px] focus:outline-none font-semibold font-mono cursor-pointer"
                         >
                           <option value="">(なし)</option>
-                          {items.map((it) => (
+                          {currentGenItems.map((it) => (
                             <option key={it.id} value={it.itemId}>
-                              {it.type === 'amulet' ? '🧿' : it.type === 'stamp' ? '💮' : '🌀'} {it.name}
+                              {it.type === 'amulet' ? '🧿' : it.type === 'stamp' ? '💮' : '🌀'} #{it.order} {it.name}
                             </option>
                           ))}
                         </select>
@@ -1049,9 +1225,9 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                           className="w-full bg-[#f5ebd7] border border-[#d6ccb0] text-[#523621] rounded-md px-1.5 py-1.5 text-[11px] focus:outline-none font-semibold font-mono cursor-pointer"
                         >
                           <option value="">(なし)</option>
-                          {items.map((it) => (
+                          {currentGenItems.map((it) => (
                             <option key={it.id} value={it.itemId}>
-                              {it.type === 'amulet' ? '🧿' : it.type === 'stamp' ? '💮' : '🌀'} {it.name}
+                              {it.type === 'amulet' ? '🧿' : it.type === 'stamp' ? '💮' : '🌀'} #{it.order} {it.name}
                             </option>
                           ))}
                         </select>
@@ -1067,9 +1243,9 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                           className="w-full bg-[#f5ebd7] border border-[#d6ccb0] text-[#523621] rounded-md px-1.5 py-1.5 text-[11px] focus:outline-none font-semibold font-mono cursor-pointer"
                         >
                           <option value="">(なし)</option>
-                          {items.map((it) => (
+                          {currentGenItems.map((it) => (
                             <option key={it.id} value={it.itemId}>
-                              {it.type === 'amulet' ? '🧿' : it.type === 'stamp' ? '💮' : '🌀'} {it.name}
+                              {it.type === 'amulet' ? '🧿' : it.type === 'stamp' ? '💮' : '🌀'} #{it.order} {it.name}
                             </option>
                           ))}
                         </select>
@@ -1082,9 +1258,9 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                           className="w-full bg-[#f5ebd7] border border-[#d6ccb0] text-[#523621] rounded-md px-1.5 py-1.5 text-[11px] focus:outline-none font-semibold font-mono cursor-pointer"
                         >
                           <option value="">(なし)</option>
-                          {items.map((it) => (
+                          {currentGenItems.map((it) => (
                             <option key={it.id} value={it.itemId}>
-                              {it.type === 'amulet' ? '🧿' : it.type === 'stamp' ? '💮' : '🌀'} {it.name}
+                              {it.type === 'amulet' ? '🧿' : it.type === 'stamp' ? '💮' : '🌀'} #{it.order} {it.name}
                             </option>
                           ))}
                         </select>
@@ -1140,7 +1316,7 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                           <span className="text-[#8a684b] font-bold">強化元:</span>
                           {fromItem ? (
                             <button 
-                              onClick={() => handleSelectItem(fromItem.itemId)}
+                              onClick={() => handleSelectItem(fromItem.id)}
                               disabled={isEditingDetails}
                               className={`font-black text-left ${
                                 isEditingDetails
@@ -1160,7 +1336,7 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                           <span className="text-[#8a684b] font-bold">強化先:</span>
                           {toItem ? (
                             <button 
-                              onClick={() => handleSelectItem(toItem.itemId)}
+                              onClick={() => handleSelectItem(toItem.id)}
                               disabled={isEditingDetails}
                               className={`font-black text-left ${
                                 isEditingDetails
@@ -1193,7 +1369,7 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                           <span className="text-[#8a684b] font-bold">関連元:</span>
                           {fromItem ? (
                             <button 
-                              onClick={() => handleSelectItem(fromItem.itemId)}
+                              onClick={() => handleSelectItem(fromItem.id)}
                               disabled={isEditingDetails}
                               className={`font-black text-left ${
                                 isEditingDetails
@@ -1213,7 +1389,7 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                           <span className="text-[#8a684b] font-bold">関連先:</span>
                           {toItem ? (
                             <button 
-                              onClick={() => handleSelectItem(toItem.itemId)}
+                              onClick={() => handleSelectItem(toItem.id)}
                               disabled={isEditingDetails}
                               className={`font-black text-left ${
                                 isEditingDetails
@@ -1250,7 +1426,7 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                           <div className="flex justify-between items-center pl-2 border-l-2 border-[#47804f]/30">
                             {targetItem ? (
                               <button 
-                                onClick={() => handleSelectItem(targetItem.itemId)}
+                                onClick={() => handleSelectItem(targetItem.id)}
                                 disabled={isEditingDetails}
                                 className={`font-black text-left font-bold ${
                                   isEditingDetails
@@ -1272,12 +1448,13 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                           <span className="text-[#8a684b] font-bold block">合体に必要な素材お守り：</span>
                           <div className="grid grid-cols-1 gap-1 pl-2 border-l-2 border-[#47804f]/30">
                             {sources.map((src, idx) => {
-                              const isSrcOwned = src.item ? !!ownedItemsMap[`${src.item.generation}_${src.item.itemId}`] : false;
+                              const srcItem = src.item;
+                              const isSrcOwned = srcItem ? !!ownedItemsMap[`${srcItem.generation}_${srcItem.itemId}`] : false;
                               return (
                                 <div key={src.itemId} className="flex items-center justify-between">
-                                  {src.item ? (
+                                  {srcItem ? (
                                     <button 
-                                      onClick={() => handleSelectItem(src.itemId)}
+                                      onClick={() => handleSelectItem(srcItem.id)}
                                       disabled={isEditingDetails}
                                       className={`font-bold text-left ${
                                         isEditingDetails
@@ -1287,7 +1464,7 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                                             : 'text-[#7c7764] line-through decoration-[#7c7764]/40 opacity-70 hover:underline cursor-pointer'
                                       }`}
                                     >
-                                      {idx + 1}. {src.item.name}
+                                      {idx + 1}. {srcItem.name}
                                     </button>
                                   ) : (
                                     <span className="text-[#8a684b] font-mono text-[10px]">{src.itemId}</span>
@@ -1416,27 +1593,60 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
         </div>
       </div>
 
-      {/* 右カラム (3/4幅) : アルバムフレーム・プログレスバー */}
+      {/* 右カラム (3/4幅) : 世代切り替え・プログレスバー・アルバムフレーム */}
       <div className="lg:col-span-3 space-y-6 order-1 lg:order-2">
-        {/* 全体プログレスバー */}
-        {isDataLoaded && (
-          <div className="bg-[#1b153a] border border-[#2d2654] rounded-2xl p-5 space-y-3 shadow-lg">
-            <div className="flex justify-between items-center text-sm">
-              <span className="font-bold text-[#ffa248] flex items-center gap-1.5 font-game">
-                👑 第4世代 コンプリート率
-              </span>
-              <span className="font-bold font-mono text-white">
-                [ {ownedAll} / {totalAll} ({percentageAll}%) ]
+        {/* 世代切り替えメニュー ＆ 全体プログレスバー */}
+        <div className="bg-[#1b153a] border border-[#2d2654] rounded-2xl p-4 sm:p-5 space-y-3.5 shadow-lg">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#2d2654]">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-extrabold text-indigo-200 tracking-wide">
+                🔄 表示世代の切り替え
               </span>
             </div>
-            <div className="w-full bg-[#0e0a22] rounded-full h-3 overflow-hidden border border-[#2d2654]">
-              <div 
-                className="bg-gradient-to-r from-[#ffa248] to-[#ffd98a] h-full rounded-full transition-all duration-500 ease-out" 
-                style={{ width: `${percentageAll}%` }}
-              ></div>
+            <div className="flex items-center gap-1 bg-[#0e0a22] p-1 rounded-xl border border-[#2d2654]">
+              {SUPPORTED_GENERATIONS.map((gen) => {
+                const isGenActive = currentGeneration === gen;
+                const label = gen === 4.5 ? '第4.5世代 (最新)' : '第4世代';
+                return (
+                  <button
+                    key={gen}
+                    type="button"
+                    onClick={() => handleGenerationChange(gen)}
+                    disabled={isEditingDetails}
+                    className={`flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs sm:text-sm transition-all font-game ${
+                      isGenActive
+                        ? 'bg-gradient-to-b from-[#ffd98a] to-[#ffa248] text-[#633307] font-black shadow-md cursor-pointer'
+                        : isEditingDetails
+                        ? 'text-indigo-400/40 cursor-not-allowed'
+                        : 'text-indigo-200 hover:text-white hover:bg-[#2d2654]/70 font-bold cursor-pointer'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
             </div>
           </div>
-        )}
+
+          {isDataLoaded && (
+            <div className="space-y-2.5">
+              <div className="flex justify-between items-center text-sm">
+                <span className="font-bold text-[#ffa248] flex items-center gap-1.5 font-game">
+                  👑 第{currentGeneration}世代 コンプリート率
+                </span>
+                <span className="font-bold font-mono text-white">
+                  [ {ownedAll} / {totalAll} ({percentageAll}%) ]
+                </span>
+              </div>
+              <div className="w-full bg-[#0e0a22] rounded-full h-3 overflow-hidden border border-[#2d2654]">
+                <div 
+                  className="bg-gradient-to-r from-[#ffa248] to-[#ffd98a] h-full rounded-full transition-all duration-500 ease-out" 
+                  style={{ width: `${percentageAll}%` }}
+                ></div>
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* モバイル用カテゴリタブ (デスクトップ時は非表示) */}
         <div className="flex lg:hidden gap-1 w-full px-2">
@@ -1515,7 +1725,7 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
               }>
                 {filteredItems.map((item) => {
                   const isOwned = !!ownedItemsMap[`${item.generation}_${item.itemId}`];
-                  const isSelected = selectedItemId === item.itemId;
+                  const isSelected = selectedDocId === item.id;
                   const isEditingThisItem = isEditingDetails && isSelected;
                   const isOtherItemDuringEdit = isEditingDetails && !isSelected;
                   const isAmulet = item.type === 'amulet';
@@ -1526,7 +1736,7 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                     return (
                       <div 
                         key={item.id}
-                        onClick={() => handleSelectItem(item.itemId)}
+                        onClick={() => handleSelectItem(item.id)}
                         className={`relative flex flex-col rounded-xl overflow-hidden border transition-all duration-200 ${
                           isOtherItemDuringEdit ? 'cursor-not-allowed' : 'cursor-pointer'
                         } ${getAmuletKindCardClass(item.amulet_kind)} ${
@@ -1648,7 +1858,7 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                     return (
                       <div 
                         key={item.id}
-                        onClick={() => handleSelectItem(item.itemId)}
+                        onClick={() => handleSelectItem(item.id)}
                         className={`relative flex flex-col items-center justify-between rounded-2xl border transition-all duration-200 ${
                           isOtherItemDuringEdit ? 'cursor-not-allowed' : 'cursor-pointer'
                         } ${
@@ -1782,6 +1992,27 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                 );
               })()}
 
+              {/* 第4世代のお守り名・効果テキスト同時引き継ぎオプション（第4.5世代編集時） */}
+              {activeSelectedItem.generation === 4.5 && (
+                <div className="bg-[#47804f]/10 border border-[#47804f]/30 rounded-2xl p-3 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="copyGen4InfoToggle"
+                      checked={copyGen4InfoOnAttach}
+                      onChange={(e) => setCopyGen4InfoOnAttach(e.target.checked)}
+                      className="accent-[#47804f] cursor-pointer w-4 h-4"
+                    />
+                    <label htmlFor="copyGen4InfoToggle" className="text-[11px] text-[#346039] font-extrabold cursor-pointer select-none">
+                      📝 第4世代のお守り名・効果テキストも一緒に引き継ぐ
+                    </label>
+                  </div>
+                  <div className="text-[9px] text-[#523621]/80 font-bold pl-6 leading-relaxed">
+                    プール画像に紐づく第4世代の同名お守り（強化先同時更新ON時はペア両方）から名前・効果文を自動コピーします。
+                  </div>
+                </div>
+              )}
+
               {/* アップロードフォーム */}
               <div className="bg-[#ebe0c5] border border-[#d6ccb0] rounded-2xl p-4 space-y-3">
                 <span className="text-[10px] text-[#8a684b] font-extrabold tracking-wide block">📤 ローカルよりお守り画像を直接アップロード (2MB以下)</span>
@@ -1813,11 +2044,11 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
               </div>
 
               {/* 画像エクスプローラー（画像プール） */}
-              <div className="space-y-4">
+              <div className="space-y-3">
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-[#8a684b]/10 pb-2">
                   <span className="text-[10px] text-[#8a684b] font-extrabold tracking-wide">📂 Storage 内に配備済みの画像プールから紐付け</span>
                   
-                  {/* is_linked 状態の切り替えトグル */}
+                  {/* 現在の世代での割当済み表示切り替えトグル */}
                   <div className="flex items-center gap-1.5 text-[10px] font-bold text-[#8a684b]">
                     <input
                       type="checkbox"
@@ -1827,43 +2058,98 @@ export default function Album({ initialItems = [], initialImagePool = [], buildT
                       className="accent-[#ffa248] cursor-pointer"
                     />
                     <label htmlFor="showAllImagesToggle" className="cursor-pointer select-none">
-                      他ので使用中の紐付け済み画像も表示
+                      第{currentGeneration}世代で割当済みの画像も表示
                     </label>
                   </div>
+                </div>
+
+                {/* お守り名・ファイル名での検索フィルタ */}
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={poolSearchQuery}
+                    onChange={(e) => setPoolSearchQuery(e.target.value)}
+                    placeholder="🔍 第4世代のお守り名・効果キーワード・ファイル名で検索..."
+                    className="w-full bg-white/80 border border-[#d6ccb0] focus:border-[#ffa248] focus:ring-2 focus:ring-[#ffa248]/20 text-[#523621] placeholder-[#8a684b]/60 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none"
+                  />
+                  {poolSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setPoolSearchQuery('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#8a684b] hover:text-[#523621] text-xs font-black cursor-pointer"
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
 
                 {imagePool.length === 0 ? (
                   <div className="text-center py-10 text-[#8a684b] text-xs italic bg-black/5 rounded-xl font-bold">
                     プール（image_pool）に画像データはありません。
                   </div>
-                ) : (
-                  <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
-                    {imagePool
-                      .filter(img => showAllPoolImages ? true : !img.is_linked)
-                      .map((img) => (
-                        <button
-                          key={img.id}
-                          type="button"
-                          onClick={() => handleAttachImage(img)}
-                          className={`p-2 bg-white/40 border hover:border-[#ffa248]/80 hover:bg-[#fffcf7] rounded-xl flex flex-col justify-center items-center gap-1 transition-all group cursor-pointer ${
-                            img.is_linked ? 'opacity-60 border-[#c8c2aa] border-dashed' : 'border-[#c8c2aa]'
-                          }`}
-                        >
-                          <div className="w-12 h-12 flex items-center justify-center p-1 relative">
-                            <img src={img.url} alt={img.fileName} className="w-10 h-10 object-contain text-[8px]" />
-                            {img.is_linked && (
-                              <span className="absolute bottom-0 right-0 bg-gray-500/80 text-white font-extrabold text-[6px] px-1 rounded scale-90">
-                                割当済
+                ) : (() => {
+                  const normalizedQuery = poolSearchQuery.trim().toLowerCase();
+                  const visiblePoolItems = imagePool.filter((img) => {
+                    const isUsedInCurrentGen = usedImageUrlsInCurrentGen.has(img.url);
+                    if (!showAllPoolImages && isUsedInCurrentGen) return false;
+                    if (!normalizedQuery) return true;
+
+                    if (img.fileName.toLowerCase().includes(normalizedQuery)) return true;
+                    const gen4Refs = gen4ItemsByImageUrl.get(img.url) || [];
+                    return gen4Refs.some(
+                      (it) =>
+                        it.name.toLowerCase().includes(normalizedQuery) ||
+                        it.effect_text.toLowerCase().includes(normalizedQuery)
+                    );
+                  });
+
+                  if (visiblePoolItems.length === 0) {
+                    return (
+                      <div className="text-center py-8 text-[#8a684b] text-xs bg-black/5 rounded-xl font-bold">
+                        条件に一致する画像が見つかりません（割当済みを表示するか検索語を変更してください）。
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                      {visiblePoolItems.map((img) => {
+                        const isUsedInCurrentGen = usedImageUrlsInCurrentGen.has(img.url);
+                        const gen4Refs = gen4ItemsByImageUrl.get(img.url) || [];
+                        const gen4Base = gen4Refs.find((m) => !/^お守り #\d+$/.test(m.name)) || null;
+
+                        return (
+                          <button
+                            key={img.id}
+                            type="button"
+                            onClick={() => handleAttachImage(img)}
+                            title={gen4Base ? `${gen4Base.name} (${img.fileName})` : img.fileName}
+                            className={`p-2 bg-white/40 border hover:border-[#ffa248]/80 hover:bg-[#fffcf7] rounded-xl flex flex-col justify-center items-center gap-1 transition-all group cursor-pointer ${
+                              isUsedInCurrentGen ? 'opacity-60 border-[#c8c2aa] border-dashed' : 'border-[#c8c2aa]'
+                            }`}
+                          >
+                            <div className="w-12 h-12 flex items-center justify-center p-1 relative">
+                              <img src={img.url} alt={gen4Base?.name || img.fileName} className="w-10 h-10 object-contain text-[8px]" />
+                              {isUsedInCurrentGen && (
+                                <span className="absolute bottom-0 right-0 bg-gray-600/85 text-white font-extrabold text-[6px] px-1 rounded scale-90">
+                                  現世代済
+                                </span>
+                              )}
+                            </div>
+                            {gen4Base && (
+                              <span className="text-[8px] text-[#523621] truncate w-full text-center font-extrabold leading-tight">
+                                {gen4Base.name}
                               </span>
                             )}
-                          </div>
-                          <span className="text-[7px] text-[#8a684b] truncate w-full text-center font-bold">
-                            {img.fileName}
-                          </span>
-                        </button>
-                      ))}
-                  </div>
-                )}
+                            <span className="text-[7px] text-[#8a684b] truncate w-full text-center font-bold leading-tight">
+                              {img.fileName}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
             

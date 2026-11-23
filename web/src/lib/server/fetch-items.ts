@@ -3,10 +3,13 @@ import { getFirestore } from 'firebase-admin/firestore';
 import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 
+export type Generation = 4 | 4.5;
+export const SUPPORTED_GENERATIONS: readonly Generation[] = [4, 4.5] as const;
+
 export interface Item {
   id: string;
   itemId: string;
-  generation: number;
+  generation: Generation;
   order: number;
   type: 'amulet' | 'stamp' | 'rune';
   amulet_kind?: 'normal' | 'rare' | 'super_rare' | 'ultra_rare' | 'ghost';
@@ -42,6 +45,10 @@ export interface BuildItemsResult {
   isFromDb: boolean;
 }
 
+function isSupportedGeneration(gen: unknown): gen is Generation {
+  return gen === 4 || gen === 4.5;
+}
+
 /**
  * Astro ビルド時 (SSG) に Firestore からマスターデータおよび画像プールデータを取得する
  */
@@ -55,7 +62,7 @@ export async function getBuildItemsData(): Promise<BuildItemsResult> {
   const projectId = process.env.PUBLIC_FIREBASE_PROJECT_ID || 'seiun-collection-prd';
 
   try {
-    console.log(`📡 [Build] 本番 Firestore (${projectId}) からマスターデータおよび画像プールを取得中...`);
+    console.log(`📡 [Build] 本番 Firestore (${projectId}) からマスターデータ(世代: ${SUPPORTED_GENERATIONS.join(', ')})および画像プールを取得中...`);
 
     const app = getApps().length === 0
       ? initializeApp({ projectId })
@@ -63,19 +70,22 @@ export async function getBuildItemsData(): Promise<BuildItemsResult> {
 
     const db = getFirestore(app);
 
-    // items と image_pool を並行フェッチ
+    // items (第4世代・第4.5世代) と image_pool を並行フェッチ
     const [itemsSnapshot, poolSnapshot] = await Promise.all([
-      db.collection('items').where('generation', '==', 4).get(),
+      db.collection('items').where('generation', 'in', [...SUPPORTED_GENERATIONS]).get(),
       db.collection('image_pool').get()
     ]);
 
     const items: Item[] = [];
     itemsSnapshot.forEach((doc) => {
       const data = doc.data();
+      const rawGen = data.generation ?? 4;
+      if (!isSupportedGeneration(rawGen)) return;
+
       const item: Item = {
         id: doc.id,
         itemId: data.itemId || '',
-        generation: data.generation ?? 4,
+        generation: rawGen,
         order: data.order ?? 0,
         type: data.type || 'amulet',
         amulet_kind: data.amulet_kind,
@@ -95,7 +105,7 @@ export async function getBuildItemsData(): Promise<BuildItemsResult> {
       };
       items.push(item);
     });
-    items.sort((a, b) => a.order - b.order);
+    items.sort((a, b) => a.generation - b.generation || a.order - b.order);
 
     const imagePool: ImagePoolItem[] = [];
     poolSnapshot.forEach((doc) => {
@@ -141,10 +151,12 @@ function getFallbackData(): BuildItemsResult {
       try {
         const raw = readFileSync(seedPath, 'utf8');
         const seedItems = JSON.parse(raw) as Item[];
-        const gen4Items = seedItems.filter(it => it.generation === 4).sort((a, b) => a.order - b.order);
-        console.log(`📁 [Build] シードファイル (${seedPath}) から ${gen4Items.length} 件のアイテムを読み込みました。`);
+        const supportedItems = seedItems
+          .filter(it => isSupportedGeneration(it.generation))
+          .sort((a, b) => a.generation - b.generation || a.order - b.order);
+        console.log(`📁 [Build] シードファイル (${seedPath}) から ${supportedItems.length} 件のアイテムを読み込みました。`);
         return {
-          items: gen4Items,
+          items: supportedItems,
           imagePool: [],
           buildTimestamp: 0,
           isFromDb: false

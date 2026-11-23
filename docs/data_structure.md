@@ -41,17 +41,17 @@ Firestore ではクエリの効率化とクライアント側でのマージ処�
 アルバムに表示する「枠（スロット）」そのものを表現するマスターデータ。
 
 - **パス:** `/items/{generation}_{itemId}`
-  - 例: `/items/4_amulet_005`
+  - 例: `/items/4_amulet_005`, `/items/4.5_amulet_4.5_001`, `/items/4.5_stamp_001`
 - **ID命名規則 (`generation_itemId`):**
-  - **メリット1 (コンソール視認性):** Alphabetic順でソートされた際に世代（`4_` など）ごとに整列されるため、Firestoreコンソールでのデータ確認が容易。
-  - **メリット2 (インデックス節約):** 世代の絞り込み（例: 第4世代のみ取得）を、セカンダリインデックスを作成せずとも、ドキュメントIDの前方一致範囲クエリ（`startAt("4_").endAt("4_\uf8ff")`）で実現可能。
+  - **メリット1 (コンソール視認性):** Alphabetic順でソートされた際に世代（`4_`, `4.5_` など）ごとに整列されるため、Firestoreコンソールでのデータ確認が容易。
+  - **メリット2 (インデックス節約):** 世代の絞り込み（例: 第4世代のみ取得）を、セカンダリインデックスを作成せずとも、ドキュメントIDの前方一致範囲クエリ（`startAt("4_").endAt("4_\uf8ff")`）や `where('generation', 'in', [4, 4.5])` で実現可能。
 - **スキーマ:**
   - `id` (string): ドキュメントID（`{generation}_{itemId}` と同一）
-  - `itemId` (string): 実体アイテムID。同じ名前・効果テキストで世代をまたぐ場合は共通、紹介文や効果が変わる場合は別IDにする。
-  - `generation` (int): 登場世代 (例: `4`)
+  - `itemId` (string): 実体アイテムID。同じ名前・効果テキストで世代をまたぐ場合は共通（例: スタンプ `stamp_001`、ルーン `rune_001`）、図鑑構成や効果が世代で変わる場合は世代別のIDにする（例: 第4.5世代お守り `amulet_4.5_001`）。
+  - `generation` (number): 登場世代 (例: `4`, `4.5`)
   - `order` (int): その世代の図鑑内での並び順 (1-indexed)
   - `type` (string): アイテム種別 (`amulet` | `stamp` | `rune`)
-  - `amulet_kind` (string, optional): お守りの種類 (`normal` | `rare` | `super_rare` | `ultra_rare` | `ghost`) ※第4世代かつ `type === 'amulet'` で設定。スタンプ・ルーンでは未使用
+  - `amulet_kind` (string, optional): お守りの種類 (`normal` | `rare` | `super_rare` | `ultra_rare` | `ghost`) ※第4世代・第4.5世代かつ `type === 'amulet'` で設定。スタンプ・ルーンでは未使用
   - `name` (string): アイテム名
   - `effect_text` (string): 紹介文・効果テキスト
   - `image_url` (string): 画像URL (Firebase Cloud Storage 参照パス)
